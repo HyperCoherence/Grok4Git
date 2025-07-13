@@ -1,0 +1,17 @@
+# Core dependencies
+openai
+requests
+python-dotenv
+
+# Terminal UI enhancements
+rich
+prompt-toolkit
+
+# Development tools
+black
+flake8
+mypy
+
+# Testing dependencies
+pytest
+pytest-mock

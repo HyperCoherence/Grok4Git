@@ -1,0 +1,38 @@
+.env
+!.env.example
+grok4git.log
+__pycache__/
+*.pyc
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Development tools
+.mypy_cache/
+.tox/
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

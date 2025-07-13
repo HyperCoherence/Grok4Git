@@ -1,0 +1,448 @@
+"""
+Chat interface for Grok4Git.
+
+This module provides the interactive chat interface between the user and Grok,
+with enhanced terminal formatting, slash commands, and user experience improvements.
+"""
+
+import json
+import logging
+from typing import List, Dict, Any, Optional
+
+from openai import OpenAI
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.status import Status
+
+from .config import config
+from .tools import TOOLS, TOOL_FUNCTIONS
+from .commands import command_registry, command_parser, command_converter
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+
+logger = logging.getLogger(__name__)
+
+
+class SlashCommandCompleter(Completer):
+    def __init__(self, commands):
+        self.commands = commands
+
+    def get_completions(self, document, complete_event):
+        word = document.get_word_before_cursor()
+        if document.text.startswith("/"):
+            for cmd in self.commands:
+                if cmd.startswith(word):
+                    yield Completion(cmd, start_position=-len(word))
+
+
+class GrokChat:
+    """Enhanced chat interface for Grok4Git with slash commands."""
+
+    # TODO: Implement handling for large files via streaming or summaries
+    # TODO: Add support for dynamic model switching
+
+    def __init__(self):
+        """Initialize the chat interface."""
+        self.console = Console()
+        self.client = OpenAI(base_url=config.xai_base_url, api_key=config.xai_api_key)
+        self.messages: List[Dict[str, Any]] = []
+        self._setup_system_message()
+        logger.info("Grok chat interface initialized")
+
+    def _setup_system_message(self) -> None:
+        """Setup the initial system message for the AI."""
+        system_message = {
+            "role": "system",
+            "content": (
+                "You are Grok, an AI assistant from xAI specialized in software development and GitHub operations. "
+                "You have access to comprehensive GitHub integration tools that allow you to interact with repositories, "
+                "manage files, create pull requests, handle issues, analyze commits, and perform various GitHub operations. "
+                "Use these tools to help users with their GitHub workflows and repository management tasks. "
+                "Be coherent and provide clear explanations of what you're doing.\n\n"
+                "RESPONSE GUIDELINES:\n"
+                "- Always explain what you're about to do before executing operations\n"
+                "- Provide context and reasoning for your actions\n"
+                "- Use formatting to make responses visually appealing\n"
+                "- When showing code or file content, use proper formatting\n"
+                "- Offer suggestions and best practices when relevant\n"
+                "- If an operation fails, explain why and suggest alternatives\n\n"
+                "TOOL USAGE GUIDELINES:\n"
+                "- For code review: Use get_commit_history to find commits, then get_commit_details and get_commit_diff to analyze changes\n"
+                "- For PRs: Branch names must be unique and descriptive (e.g., 'feature/add-logging' or 'fix/auth-bug')\n"
+                "- File paths should be relative to repo root (e.g., 'src/main.py' not '/src/main.py')\n"
+                "- Repository names must be in 'owner/repo' format\n"
+                "- Always explain what you're doing before using destructive operations"
+            ),
+        }
+        self.messages.append(system_message)
+
+    def _display_welcome(self) -> None:
+        """Display welcome message and instructions."""
+        welcome_text = """
+# Welcome to Grok4Git! 🚀
+
+I'm your AI assistant for GitHub operations. I can help you with:
+
+### 💬 **Natural Language**
+Just type your request in plain English, and I'll help you out!
+
+### ⚡ **Slash Commands** (New!)
+Use `/command` syntax for quick actions:
+- `/repos` - List your repositories
+- `/read owner/repo file.py` - Read a file
+- `/commits owner/repo` - Show commit history
+- `/help` - Show all available commands
+
+### 🎯 **What I Can Do**
+- Repository management and analysis
+- File operations and content reading
+- Commit review and diff analysis
+- Pull request creation and management
+- Issue tracking and creation
+- Branch operations and history
+
+**Quick Start**: Try `/help` to see all commands, or just ask me anything!
+        """
+
+        self.console.print(
+            Panel(
+                Markdown(welcome_text),
+                title="[bold cyan]Grok4Git[/bold cyan]",
+                subtitle="[dim]AI-Powered GitHub Assistant[/dim]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    def _display_command_help(self, command_name: Optional[str] = None) -> None:
+        """Display help for commands."""
+        if command_name:
+            cmd = command_registry.get_command(command_name)
+            if cmd:
+                self._display_single_command_help(cmd)
+            else:
+                similar = command_registry.find_similar_commands(command_name)
+                self.console.print(f"[red]Unknown command: [bold]/{command_name}[/bold][/red]")
+                if similar:
+                    self.console.print(
+                        f"[yellow]Did you mean: [bold]{', '.join(similar)}[/bold]?[/yellow]"
+                    )
+        else:
+            self._display_all_commands_help()
+
+    def _display_single_command_help(self, cmd) -> None:
+        """Display help for a single command."""
+        panel_content = f"""
+## [bold cyan]/{cmd.name}[/bold cyan]
+
+{cmd.description}
+
+**Usage:** `{cmd.usage}`
+
+**Examples:**
+{chr(10).join(f'  • `{example}`' for example in cmd.examples)}
+        """
+
+        if cmd.aliases:
+            panel_content += f"\n**Aliases:** {', '.join(f'`/{alias}`' for alias in cmd.aliases)}"
+
+        self.console.print(
+            Panel(
+                Markdown(panel_content),
+                title="[bold green]Command Help[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
+
+    def _display_all_commands_help(self) -> None:
+        """Display help for all commands organized by category."""
+        commands_by_category = command_registry.get_commands_by_category()
+
+        help_content = "# Available Commands\n\n"
+
+        for category, commands in commands_by_category.items():
+            help_content += f"## {category.value}\n\n"
+
+            for cmd in commands:
+                aliases_str = f" (aliases: {', '.join(cmd.aliases)})" if cmd.aliases else ""
+                help_content += f"- **`/{cmd.name}`** - {cmd.description}{aliases_str}\n"
+
+            help_content += "\n"
+
+        help_content += """
+## Tips
+- Use `/help <command>` for detailed help on a specific command
+- Commands are case-insensitive and support aliases
+- You can also use natural language - just describe what you want to do!
+
+## Examples
+```
+/repos                          # List all repositories
+/read microsoft/vscode README.md  # Read a file
+/commits my-user/my-app         # Show commit history
+/help pr                        # Get help for PR commands
+```
+        """
+
+        self.console.print(
+            Panel(
+                Markdown(help_content),
+                title="[bold green]Command Reference[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
+
+    def _execute_slash_command(self, command_name: str, args: List[str]) -> bool:
+        """
+        Execute a slash command.
+
+        Returns:
+            True if the session should end, False otherwise
+        """
+        cmd = command_registry.get_command(command_name)
+
+        if not cmd:
+            similar = command_registry.find_similar_commands(command_name)
+            self.console.print(f"[red]Unknown command: [bold]/{command_name}[/bold][/red]")
+            if similar:
+                self.console.print(
+                    f"[yellow]Did you mean: [bold]{', '.join(similar)}[/bold]?[/yellow]"
+                )
+            return False
+
+        # Handle system commands directly
+        if cmd.name == "help":
+            help_cmd = args[0] if args else None
+            self._display_command_help(help_cmd)
+            return False
+
+        elif cmd.name == "clear":
+            self.messages = []
+            self._setup_system_message()
+            self.console.clear()
+            self.console.print("[green]✅ Conversation history cleared[/green]")
+            return False
+
+        elif cmd.name == "exit":
+            self.console.print("[yellow]👋 Goodbye![/yellow]")
+            return True
+
+        # Convert slash command to natural language for AI
+        natural_language = command_converter.convert_to_natural_language(cmd, args)
+
+        if natural_language:
+            self.console.print(f"[dim]💭 Interpreting: {natural_language}[/dim]")
+            self.messages.append({"role": "user", "content": natural_language})
+            self._process_ai_response()
+        else:
+            self.console.print(f"[red]Invalid usage of [bold]/{cmd.name}[/bold][/red]")
+            self.console.print(f"[yellow]Usage: [bold]{cmd.usage}[/bold][/yellow]")
+            self.console.print(
+                f"[yellow]Try: [bold]/help {cmd.name}[/bold] for more information[/yellow]"
+            )
+
+        return False
+
+    def _get_user_input(self) -> str:
+        """Get user input with rich prompt and command auto-completion."""
+        try:
+            session = PromptSession(
+                completer=SlashCommandCompleter(list(command_registry.commands.keys()))
+            )
+            user_input = session.prompt("[bold cyan]You[/bold cyan]: ")
+            return user_input.strip()
+        except (KeyboardInterrupt, EOFError):
+            self.console.print("\n[yellow]Session ended by user[/yellow]")
+            return "/exit"
+
+    def _display_response(self, content: str) -> None:
+        """Display AI response with rich formatting."""
+        if content:
+            # Try to render as markdown if it looks like markdown
+            if any(marker in content for marker in ["#", "*", "`", "```", "-"]):
+                try:
+                    self.console.print(
+                        Panel(
+                            Markdown(content),
+                            title="[bold green]🤖 Grok[/bold green]",
+                            border_style="green",
+                            padding=(1, 2),
+                        )
+                    )
+                except Exception:
+                    # Fall back to plain text if markdown parsing fails
+                    self.console.print(f"[bold green]🤖 Grok:[/bold green] {content}")
+            else:
+                self.console.print(f"[bold green]🤖 Grok:[/bold green] {content}")
+        else:
+            self.console.print(
+                "[bold green]🤖 Grok:[/bold green] [yellow]No response content[/yellow]"
+            )
+
+    def _execute_tool(self, tool_call) -> str:
+        """Execute a tool function call."""
+        function_name = tool_call.function.name
+
+        try:
+            function_args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            error_msg = f"Error parsing tool arguments: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
+        if function_name not in TOOL_FUNCTIONS:
+            error_msg = f"Unknown function: {function_name}"
+            logger.error(error_msg)
+            return error_msg
+
+        # Check if this is a destructive operation that requires confirmation
+        if function_name in ["delete_file", "create_repository"]:
+            if not self._confirm_destructive_operation(function_name, function_args):
+                return "Operation cancelled by user"
+
+        try:
+            with Status(f"[cyan]⚡ Executing {function_name}...", console=self.console):
+                function_to_call = TOOL_FUNCTIONS[function_name]
+                result = function_to_call(**function_args)
+
+            logger.info(f"Tool {function_name} executed successfully")
+            return str(result)
+
+        except Exception as e:
+            error_msg = f"Error executing {function_name}: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
+    def _confirm_destructive_operation(
+        self, function_name: str, function_args: Dict[str, Any]
+    ) -> bool:
+        """Ask user to confirm destructive operations."""
+        from rich.prompt import Confirm
+
+        if function_name == "delete_file":
+            repo = function_args.get("repo", "unknown")
+            path = function_args.get("path", "unknown")
+
+            self.console.print(
+                Panel(
+                    f"[bold red]⚠️  DESTRUCTIVE OPERATION[/bold red]\n\n"
+                    f"[yellow]You are about to delete:[/yellow]\n"
+                    f"[red]📁 Repository: {repo}[/red]\n"
+                    f"[red]📄 File: {path}[/red]\n\n"
+                    f"[yellow]⚠️  This action cannot be undone.[/yellow]",
+                    title="[bold red]Confirmation Required[/bold red]",
+                    border_style="red",
+                )
+            )
+
+            return Confirm.ask(
+                "Are you sure you want to proceed?", default=False, console=self.console
+            )
+
+        elif function_name == "create_repository":
+            name = function_args.get("name", "unknown")
+            private = function_args.get("private", False)
+
+            self.console.print(
+                Panel(
+                    f"[bold yellow]📦 REPOSITORY CREATION[/bold yellow]\n\n"
+                    f"[cyan]Creating new repository:[/cyan]\n"
+                    f"[cyan]📁 Name: {name}[/cyan]\n"
+                    f"[cyan]🔒 Visibility: {'Private' if private else 'Public'}[/cyan]",
+                    title="[bold yellow]Confirmation[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
+
+            return Confirm.ask(
+                "Do you want to create this repository?", default=True, console=self.console
+            )
+
+        return True
+
+    def _process_ai_response(self) -> None:
+        """Process AI response and handle tool calls."""
+        try:
+            with Status("[cyan]🤔 Thinking...", console=self.console):
+                response = self.client.chat.completions.create(
+                    model=config.model_name, messages=self.messages, tools=TOOLS, tool_choice="auto"
+                )
+
+            response_message = response.choices[0].message
+            self.messages.append(response_message)
+
+            # Handle tool calls
+            if response_message.tool_calls:
+                for tool_call in response_message.tool_calls:
+                    result = self._execute_tool(tool_call)
+                    self.messages.append(
+                        {"role": "tool", "content": result, "tool_call_id": tool_call.id}
+                    )
+
+                # Get final response after tool execution
+                self._process_ai_response()
+            else:
+                # Display final response
+                content = response_message.content
+                if content:
+                    self._display_response(content)
+                else:
+                    self.console.print("[yellow]No response content received[/yellow]")
+
+        except Exception as e:
+            error_msg = f"Error processing AI response: {str(e)}"
+            logger.error(error_msg)
+            self.console.print(f"[red]❌ Error: {error_msg}[/red]")
+
+    def run(self) -> None:
+        """Run the main chat loop."""
+        self._display_welcome()
+
+        while True:
+            try:
+                user_input = self._get_user_input()
+
+                if not user_input:
+                    continue
+
+                # Check if it's a slash command
+                is_command, command_name, args = command_parser.parse_command(user_input)
+
+                if is_command:
+                    # Handle slash command
+                    if self._execute_slash_command(command_name, args):
+                        break  # Exit if command returned True
+                else:
+                    # Handle natural language input
+                    self.messages.append({"role": "user", "content": user_input})
+                    self._process_ai_response()
+
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]Session interrupted by user[/yellow]")
+                break
+            except Exception as e:
+                error_msg = f"Unexpected error in chat loop: {str(e)}"
+                logger.error(error_msg)
+                self.console.print(f"[red]❌ Error: {error_msg}[/red]")
+                self.console.print(
+                    "[yellow]You can continue chatting or type '/exit' to quit[/yellow]"
+                )
+
+
+def main():
+    """Main entry point for the chat interface."""
+    try:
+        chat = GrokChat()
+        chat.run()
+    except Exception as e:
+        console = Console()
+        console.print(f"[red]❌ Failed to start chat interface: {str(e)}[/red]")
+        logger.error(f"Failed to start chat interface: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
