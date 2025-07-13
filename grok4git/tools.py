@@ -130,48 +130,48 @@ def get_file_content(repo: str, path: str, branch: Optional[str] = None) -> str:
 def _get_large_file_summary(repo: str, path: str, branch: str, file_size: int) -> str:
     """
     Get a summary of a large file instead of full content.
-    
+
     Args:
         repo: Repository name
         path: File path
         branch: Branch name
         file_size: Size of the file in bytes
-    
+
     Returns:
         Summary of the file
     """
     try:
         # Get raw content in chunks
         raw_content = github_api.get_file_content_raw(repo, path, branch)
-        
+
         # Get first and last few lines for context
-        lines = raw_content.split('\n')
+        lines = raw_content.split("\n")
         total_lines = len(lines)
-        
+
         # Show first 50 and last 20 lines
         first_lines = lines[:50]
         last_lines = lines[-20:] if total_lines > 70 else []
-        
+
         # Create summary
         summary = f"📄 **Large File Summary: {path}**\n\n"
         summary += f"**File Size:** {file_size:,} bytes\n"
         summary += f"**Total Lines:** {total_lines:,}\n"
         summary += f"**File Type:** {path.split('.')[-1] if '.' in path else 'Unknown'}\n\n"
-        
+
         summary += "**First 50 lines:**\n```\n"
-        summary += '\n'.join(first_lines)
+        summary += "\n".join(first_lines)
         summary += "\n```\n\n"
-        
+
         if last_lines and total_lines > 70:
             summary += f"**... ({total_lines - 70:,} lines omitted) ...**\n\n"
             summary += "**Last 20 lines:**\n```\n"
-            summary += '\n'.join(last_lines)
+            summary += "\n".join(last_lines)
             summary += "\n```\n\n"
-        
+
         summary += "💡 **Tip:** For specific sections, ask me to search for patterns or functions within this file."
-        
+
         return summary
-        
+
     except Exception as e:
         return f"Error getting large file summary: {str(e)}. File size: {file_size:,} bytes"
 

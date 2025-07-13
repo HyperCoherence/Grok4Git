@@ -84,10 +84,12 @@ class GitHubAPI:
                 if "x-ratelimit-remaining" in response.headers:
                     remaining = response.headers["x-ratelimit-remaining"]
                     logger.debug(f"GitHub API rate limit remaining: {remaining}")
-                    
+
                     # Warn if rate limit is getting low
                     if int(remaining) < 100:
-                        logger.warning(f"GitHub API rate limit running low: {remaining} requests remaining")
+                        logger.warning(
+                            f"GitHub API rate limit running low: {remaining} requests remaining"
+                        )
 
                 response.raise_for_status()
                 return response
@@ -99,8 +101,10 @@ class GitHubAPI:
                         reset_time = int(response.headers.get("x-ratelimit-reset", 0))
                         current_time = int(time.time())
                         delay = max(1, reset_time - current_time)
-                        
-                        logger.warning(f"Rate limit exceeded. Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})")
+
+                        logger.warning(
+                            f"Rate limit exceeded. Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})"
+                        )
                         time.sleep(delay)
                         continue
                     else:

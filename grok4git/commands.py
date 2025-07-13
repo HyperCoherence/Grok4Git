@@ -436,7 +436,9 @@ class CommandConverter:
             repo = args[0]
             pr_number = args[1]
             merge_method = args[2] if len(args) > 2 else "merge"
-            return f"Merge pull request #{pr_number} in repository {repo} using {merge_method} method"
+            return (
+                f"Merge pull request #{pr_number} in repository {repo} using {merge_method} method"
+            )
 
         elif cmd.name == "comment":
             if len(args) < 3:
