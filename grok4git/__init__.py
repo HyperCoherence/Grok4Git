@@ -8,11 +8,13 @@ using natural language through Grok AI.
 try:
     # Try to get version from setuptools-scm
     from importlib.metadata import version
+
     __version__ = version("grok4git")
 except ImportError:
     # Fallback for older Python versions
     try:
         from importlib_metadata import version
+
         __version__ = version("grok4git")
     except ImportError:
         # Final fallback if package not installed
