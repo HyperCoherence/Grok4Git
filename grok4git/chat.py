@@ -250,11 +250,11 @@ Use `/command` syntax for quick actions:
     def _get_user_input(self) -> str:
         """Get user input with rich prompt and command auto-completion."""
         try:
-            session = PromptSession(
+            session: PromptSession = PromptSession(
                 completer=SlashCommandCompleter(list(command_registry.commands.keys()))
             )
             user_input = session.prompt("[bold cyan]You[/bold cyan]: ")
-            return user_input.strip()
+            return str(user_input.strip())
         except (KeyboardInterrupt, EOFError):
             self.console.print("\n[yellow]Session ended by user[/yellow]")
             return "/exit"
@@ -306,8 +306,13 @@ Use `/command` syntax for quick actions:
 
         try:
             with Status(f"[cyan]⚡ Executing {function_name}...", console=self.console):
-                function_to_call = TOOL_FUNCTIONS[function_name]
-                result = function_to_call(**function_args)
+                function_to_call = TOOL_FUNCTIONS.get(function_name)
+                if function_to_call is None:
+                    return f"Error: Unknown function {function_name}"
+                if callable(function_to_call):
+                    result = function_to_call(**function_args)
+                else:
+                    return f"Error: {function_name} is not callable"
 
             logger.info(f"Tool {function_name} executed successfully")
             return str(result)
@@ -368,8 +373,11 @@ Use `/command` syntax for quick actions:
         """Process AI response and handle tool calls."""
         try:
             with Status("[cyan]🤔 Thinking...", console=self.console):
-                response = self.client.chat.completions.create(
-                    model=config.model_name, messages=self.messages, tools=TOOLS, tool_choice="auto"
+                response = self.client.chat.completions.create(  # type: ignore
+                    model=config.model_name, 
+                    messages=self.messages, 
+                    tools=TOOLS, 
+                    tool_choice="auto"
                 )
 
             response_message = response.choices[0].message

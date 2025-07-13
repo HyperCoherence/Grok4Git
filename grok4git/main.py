@@ -10,6 +10,7 @@ using natural language through Grok AI.
 import argparse
 import logging
 import sys
+from typing import Any
 
 from .config import config
 from .chat import GrokChat
@@ -127,7 +128,7 @@ def test_configuration() -> bool:
             client = OpenAI(base_url=config.xai_base_url, api_key=config.xai_api_key)
 
             # Make a simple API call to test connectivity
-            response = client.chat.completions.create(
+            xai_response: Any = client.chat.completions.create(
                 model=config.model_name,
                 messages=[{"role": "user", "content": "Hello"}],
                 max_tokens=10,

@@ -21,7 +21,8 @@ class GitHubAPI:
         """Initialize GitHub API client with session."""
         self.session = requests.Session()
         self.session.headers.update(config.get_github_headers())
-        self.session.timeout = config.api_timeout
+        # Store timeout for use in requests
+        self.timeout = config.api_timeout
         logger.info("GitHub API client initialized")
 
     def get_default_branch(self, repo: str) -> str:
@@ -43,7 +44,7 @@ class GitHubAPI:
             response = self.session.get(url)
             response.raise_for_status()
 
-            default_branch = response.json().get("default_branch", "main")
+            default_branch = str(response.json().get("default_branch", "main"))
             logger.debug(f"Default branch for {repo}: {default_branch}")
             return default_branch
 
@@ -78,7 +79,7 @@ class GitHubAPI:
         """
         for attempt in range(max_retries + 1):
             try:
-                response = self.session.request(method=method, url=url, json=data, params=params)
+                response = self.session.request(method=method, url=url, json=data, params=params, timeout=self.timeout)
 
                 # Log rate limit information
                 if "x-ratelimit-remaining" in response.headers:
@@ -116,6 +117,9 @@ class GitHubAPI:
             except requests.exceptions.RequestException as e:
                 logger.error(f"GitHub API request failed: {method} {url} - {str(e)}")
                 raise
+        
+        # This should never be reached, but satisfies MyPy
+        raise requests.exceptions.RequestException("Max retries exceeded")
 
     def get_paginated_results(
         self, url: str, params: Optional[Dict[str, Any]] = None, max_pages: int = 100

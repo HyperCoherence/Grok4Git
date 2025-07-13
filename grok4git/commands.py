@@ -237,7 +237,7 @@ class CommandRegistry:
 
     def get_commands_by_category(self) -> Dict[CommandCategory, List[Command]]:
         """Get all commands organized by category."""
-        categorized = {}
+        categorized: Dict[CommandCategory, List[Command]] = {}
         seen = set()
 
         for cmd in self.commands.values():

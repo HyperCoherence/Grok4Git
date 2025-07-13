@@ -296,7 +296,7 @@ def create_pull_request(
                     response = github_api.make_request("POST", pr_url, data=pr_data)
                     pr_html_url = response.json()["html_url"]
                     logger.info(f"Pull request created successfully: {pr_html_url}")
-                    return pr_html_url
+                    return str(pr_html_url)
                 except Exception as e4:
                     return f"Error creating pull request: {str(e4)}"
             else:
@@ -403,7 +403,7 @@ def create_pull_request(
             response = github_api.make_request("POST", pr_url, data=pr_data)
             pr_html_url = response.json()["html_url"]
             logger.info(f"Pull request created successfully: {pr_html_url}")
-            return pr_html_url
+            return str(pr_html_url)
         except Exception as e:
             if "404" in str(e):
                 return (
@@ -567,7 +567,7 @@ def manage_issues(
             issue_url = response.json()["html_url"]
 
             logger.info(f"Issue created successfully: {issue_url}")
-            return issue_url
+            return str(issue_url)
 
         else:
             return f"Error: Invalid action '{action}'. Use 'list' or 'create'"
@@ -903,7 +903,7 @@ def create_repository(name: str, description: str = "", private: bool = False) -
 
         repo_url = repo_data["html_url"]
         logger.info(f"Repository created successfully: {repo_url}")
-        return repo_url
+        return str(repo_url)
 
     except Exception as e:
         error_msg = f"Error creating repository: {str(e)}"
