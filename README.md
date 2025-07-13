@@ -37,18 +37,18 @@ pip install grok4git
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/HyperCoherence/Grok4Git.git
+git clone https://github.com/HyperCoherence/Grok4Git.git
    cd Grok4Git
    ```
 
 2. **Install dependencies**:
    ```bash
-   pip install -r requirements.txt
+pip install -r requirements.txt
    ```
 
 3. **Install the package**:
    ```bash
-   pip install -e .
+pip install -e .
    ```
 
 ## 🔧 Setup
@@ -211,6 +211,14 @@ You: Show me information about my most active repository
 Grok: [Displays repository statistics, recent commits, and activity]
 ```
 
+## 🆕 New: Demo Screenshots
+
+Here are screenshots from a real conversation with Grok, demonstrating how it can analyze and recommend improvements for your repo:
+
+![Screenshot 1](images/Screenshot_1.jpg)
+
+![Screenshot 2](images/Screenshot_2.jpg)
+
 ## 🚨 Limitations
 
 - **Rate Limits**: GitHub API has rate limits (5,000 requests per hour for authenticated users)
@@ -276,4 +284,4 @@ For bugs and feature requests, please create an issue on [GitHub Issues](https:/
 
 ---
 
-**Created by [Oliver Baumgart](https://twitter.com/OliverBaumgart)** | **Follow [@OliverBaumgart](https://twitter.com/OliverBaumgart) on Twitter** 
+**Created by [Oliver Baumgart](https://twitter.com/OliverBaumgart)** | **Follow [@OliverBaumgart](https://twitter.com/OliverBaumgart) on Twitter**
