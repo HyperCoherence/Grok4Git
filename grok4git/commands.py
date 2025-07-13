@@ -237,7 +237,7 @@ class CommandRegistry:
 
     def get_commands_by_category(self) -> Dict[CommandCategory, List[Command]]:
         """Get all commands organized by category."""
-        categorized = {}
+        categorized: Dict[CommandCategory, List[Command]] = {}
         seen = set()
 
         for cmd in self.commands.values():
@@ -436,7 +436,9 @@ class CommandConverter:
             repo = args[0]
             pr_number = args[1]
             merge_method = args[2] if len(args) > 2 else "merge"
-            return f"Merge pull request #{pr_number} in repository {repo} using {merge_method} method"
+            return (
+                f"Merge pull request #{pr_number} in repository {repo} using {merge_method} method"
+            )
 
         elif cmd.name == "comment":
             if len(args) < 3:

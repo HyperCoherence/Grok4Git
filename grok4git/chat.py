@@ -21,6 +21,7 @@ from .commands import command_registry, command_parser, command_converter
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +254,7 @@ Use `/command` syntax for quick actions:
             session = PromptSession(
                 completer=SlashCommandCompleter(list(command_registry.commands.keys()))
             )
-            user_input = session.prompt("[bold cyan]You[/bold cyan]: ")
+            user_input = session.prompt(HTML("<ansicyan><b>You</b></ansicyan>: "))
             return user_input.strip()
         except (KeyboardInterrupt, EOFError):
             self.console.print("\n[yellow]Session ended by user[/yellow]")
