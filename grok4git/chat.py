@@ -8,7 +8,7 @@ with enhanced terminal formatting, slash commands, and user experience improveme
 import json
 import logging
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from openai import OpenAI
 from rich.console import Console
@@ -140,6 +140,8 @@ Use `/command` for controlling the CLI client:
 - **Ctrl+C** to interrupt long-running requests
 - Use natural language for GitHub operations
 - Use slash commands only for client control
+- **Context window status** shown before each prompt
+- Use `/clear` to reset context when it gets full
 - Try `/help` to see all available commands
 
 **Quick Start**: Ask me "List my repositories" or try `/repos` for a quick list!
@@ -285,8 +287,23 @@ Use `/command` for controlling the CLI client:
                 return False
             
             old_model = config.model_name
-            config.model_name = args[0]
-            self.console.print(f"[green]✅ Model switched from [bold]{old_model}[/bold] to [bold]{config.model_name}[/bold][/green]")
+            old_context_size = self._get_context_window_size(old_model)
+            new_model = args[0]
+            new_context_size = self._get_context_window_size(new_model)
+            
+            # Update the environment variable and reload config
+            self._update_env_variable("MODEL_NAME", new_model)
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+            
+            self.console.print(f"[green]✅ Model switched from [bold]{old_model}[/bold] to [bold]{new_model}[/bold][/green]")
+            
+            # Show context window change if different
+            if old_context_size != new_context_size:
+                old_size_display = f"{old_context_size//1000}K"
+                new_size_display = f"{new_context_size//1000}K"
+                self.console.print(f"[blue]🔄 Context window: {old_size_display} → {new_size_display} tokens[/blue]")
+            
             return False
 
         elif cmd.name == "repos":
@@ -419,9 +436,92 @@ Use `/command` for controlling the CLI client:
         with open(env_file, "w") as f:
             f.writelines(env_lines)
 
+    def _estimate_token_count(self, text: str) -> int:
+        """Estimate token count for a given text."""
+        # Rough estimation: 1 token ≈ 4 characters for most text
+        # This is a simplified approximation since we don't have direct access to the tokenizer
+        return len(text) // 4
+
+    def _get_context_window_size(self, model_name: str) -> int:
+        """Get the context window size for a given model."""
+        # Model context window sizes (in tokens)
+        model_limits = {
+            "grok-4": 131072,  # 128K tokens
+            "grok-4-0709": 131072,  # 128K tokens
+            "grok-beta": 131072,  # 128K tokens
+            "grok-vision-beta": 131072,  # 128K tokens
+        }
+        
+        # Default to 128K if model not found
+        return model_limits.get(model_name, 131072)
+
+    def _calculate_context_usage(self) -> Tuple[int, int, float]:
+        """Calculate current context usage."""
+        total_tokens = 0
+        
+        # Count tokens in all messages
+        for message in self.messages:
+            content = message.get("content", "")
+            total_tokens += self._estimate_token_count(str(content))
+        
+        # Get context window size for current model
+        context_window = self._get_context_window_size(config.model_name)
+        
+        # Calculate percentage used
+        usage_percentage = (total_tokens / context_window) * 100
+        
+        return total_tokens, context_window, usage_percentage
+
+    def _get_context_status_display(self) -> str:
+        """Get a formatted string showing context window status."""
+        try:
+            used_tokens, total_tokens, usage_percentage = self._calculate_context_usage()
+            remaining_percentage = 100 - usage_percentage
+            
+            # Choose color and emoji based on usage
+            if remaining_percentage > 70:
+                color = "green"
+                emoji = "🟢"
+            elif remaining_percentage > 40:
+                color = "yellow"
+                emoji = "🟡"
+            elif remaining_percentage > 20:
+                color = "orange3"
+                emoji = "🟠"
+            else:
+                color = "red"
+                emoji = "🔴"
+            
+            # Format the display with token count for more detail
+            if used_tokens < 1000:
+                token_display = f"{used_tokens}"
+            else:
+                token_display = f"{used_tokens/1000:.1f}K"
+            
+            total_display = f"{total_tokens//1000}K"
+            
+            return f"[{color}]{emoji} {remaining_percentage:.0f}% Context Left[/{color}] [dim]({token_display}/{total_display})[/dim]"
+            
+        except Exception as e:
+            logger.debug(f"Error calculating context usage: {e}")
+            return "[dim]Context: Unknown[/dim]"
+
     def _get_user_input(self) -> str:
         """Get user input with rich prompt and command auto-completion."""
         try:
+            # Get context status for display
+            context_status = self._get_context_status_display()
+            
+            # Check if context is getting low and show warning
+            _, _, usage_percentage = self._calculate_context_usage()
+            if usage_percentage > 95:  # More than 95% used
+                self.console.print(f"\n[red]🚨 Critical: Context window is {usage_percentage:.0f}% full! Use [bold]/clear[/bold] to reset or responses may be truncated.[/red]")
+            elif usage_percentage > 80:  # More than 80% used
+                self.console.print(f"\n[yellow]⚠️  Warning: Context window is {usage_percentage:.0f}% full. Consider using [bold]/clear[/bold] to reset.[/yellow]")
+            
+            # Display context status before the prompt
+            self.console.print(context_status, end=" ")
+            
             session: PromptSession = PromptSession(
                 completer=SlashCommandCompleter(list(command_registry.commands.keys()))
             )
