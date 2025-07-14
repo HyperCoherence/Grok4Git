@@ -7,6 +7,7 @@ with enhanced terminal formatting, slash commands, and user experience improveme
 
 import json
 import logging
+import os
 from typing import List, Dict, Any, Optional
 
 from openai import OpenAI
@@ -286,16 +287,12 @@ Use `/command` for controlling the CLI client:
             self._execute_repos_command(args)
             return False
 
-        # Only peer-review commands need AI processing
-        elif cmd.name in ["peer-review-toggle", "peer-review-status"]:
-            natural_language = command_converter.convert_to_natural_language(cmd, args)
-            if natural_language:
-                self.console.print(f"[dim]💭 Interpreting: {natural_language}[/dim]")
-                self.messages.append({"role": "user", "content": natural_language})
-                self._process_ai_response()
-            else:
-                self.console.print(f"[red]Invalid usage of [bold]/{cmd.name}[/bold][/red]")
-                self.console.print(f"[yellow]Usage: [bold]{cmd.usage}[/bold][/yellow]")
+        elif cmd.name == "peer-review-toggle":
+            self._execute_peer_review_toggle(args)
+            return False
+
+        elif cmd.name == "peer-review-status":
+            self._execute_peer_review_status()
             return False
 
         # Unknown command (shouldn't happen due to registry check above)
@@ -320,6 +317,101 @@ Use `/command` for controlling the CLI client:
             
         except Exception as e:
             self.console.print(f"[red]❌ Error fetching repositories: {str(e)}[/red]")
+
+    def _execute_peer_review_status(self) -> None:
+        """Execute /peer-review-status command directly."""
+        try:
+            status_text = f"""
+## 🔍 Peer Review Configuration
+
+**Status:** {'🟢 ENABLED' if config.pr_peer_review_enabled else '🔴 DISABLED'}
+
+**Settings:**
+- Model: `{config.peer_review_model}`
+- Max Iterations: `{config.max_review_iterations}`
+- Environment Variable: `ENABLE_PR_PEER_REVIEW={str(config.pr_peer_review_enabled).lower()}`
+
+**Usage:**
+- Use `/peer-review-toggle enable` to enable peer review
+- Use `/peer-review-toggle disable` to disable peer review
+- Use `/peer-review-toggle` to toggle current state
+            """
+
+            self.console.print(
+                Panel(
+                    Markdown(status_text),
+                    title="[bold cyan]Peer Review Status[/bold cyan]",
+                    border_style="cyan",
+                    padding=(1, 2),
+                )
+            )
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Error reading peer review status: {str(e)}[/red]")
+
+    def _execute_peer_review_toggle(self, args: List[str]) -> None:
+        """Execute /peer-review-toggle command directly."""
+        try:
+            current_status = config.pr_peer_review_enabled
+            
+            if not args:
+                # Toggle current state
+                new_status = not current_status
+                action = "enabled" if new_status else "disabled"
+                self.console.print(f"[yellow]🔄 Toggling peer review from {('enabled' if current_status else 'disabled')} to {action}[/yellow]")
+            else:
+                # Set specific state
+                arg = args[0].lower()
+                if arg in ["enable", "on", "true"]:
+                    new_status = True
+                    action = "enabled"
+                elif arg in ["disable", "off", "false"]:
+                    new_status = False
+                    action = "disabled"
+                else:
+                    self.console.print(f"[red]❌ Invalid argument: {args[0]}[/red]")
+                    self.console.print("[yellow]Usage: /peer-review-toggle [enable|disable][/yellow]")
+                    return
+            
+            # Update .env file
+            self._update_env_variable("ENABLE_PR_PEER_REVIEW", str(new_status).lower())
+            
+            # Reload config
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+            
+            # Confirm the change
+            emoji = "🟢" if new_status else "🔴"
+            self.console.print(f"[green]✅ Peer review {action} {emoji}[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Error toggling peer review: {str(e)}[/red]")
+
+    def _update_env_variable(self, key: str, value: str) -> None:
+        """Update a single environment variable in .env file."""
+        env_file = ".env"
+        
+        # Read current .env file
+        env_lines = []
+        if os.path.exists(env_file):
+            with open(env_file, "r") as f:
+                env_lines = f.readlines()
+        
+        # Update or add the key
+        key_found = False
+        for i, line in enumerate(env_lines):
+            if line.strip().startswith(f"{key}="):
+                env_lines[i] = f"{key}={value}\n"
+                key_found = True
+                break
+        
+        # Add the key if not found
+        if not key_found:
+            env_lines.append(f"{key}={value}\n")
+        
+        # Write back to .env file
+        with open(env_file, "w") as f:
+            f.writelines(env_lines)
 
     def _get_user_input(self) -> str:
         """Get user input with rich prompt and command auto-completion."""

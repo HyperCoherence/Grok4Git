@@ -177,24 +177,9 @@ class CommandConverter:
     @staticmethod
     def convert_to_natural_language(cmd: Command, args: List[str]) -> Optional[str]:
         """Convert a slash command to natural language for the AI."""
-        # Note: Most client control commands are handled directly in chat.py
-        # Only commands that need AI processing are converted here
+        # Note: All current slash commands are handled directly in chat.py
+        # This method is kept for potential future AI-powered commands
         
-        if cmd.name == "peer-review-toggle":
-            if not args:
-                return "Show current peer review status and toggle settings"
-            
-            action = args[0].lower()
-            if action in ["enable", "on", "true"]:
-                return "Enable peer review for pull requests"
-            elif action in ["disable", "off", "false"]:
-                return "Disable peer review for pull requests"
-            else:
-                return "Show current peer review status and toggle settings"
-
-        elif cmd.name == "peer-review-status":
-            return "Show current peer review configuration and settings"
-
         return None
 
 
