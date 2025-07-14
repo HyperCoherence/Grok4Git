@@ -461,11 +461,31 @@ Use `/command` for controlling the CLI client:
         
         # Count tokens in all messages
         for message in self.messages:
-            content = message.get("content", "")
-            total_tokens += self._estimate_token_count(str(content))
+            content = ""
+            
+            try:
+                # Handle both dict and ChatCompletionMessage objects
+                if isinstance(message, dict):
+                    content = message.get("content", "")
+                else:
+                    # ChatCompletionMessage object - handle various attributes
+                    content = getattr(message, "content", "") or ""
+                
+                # Ensure content is a string
+                if content is not None:
+                    total_tokens += self._estimate_token_count(str(content))
+                    
+            except Exception as e:
+                # Skip problematic messages but log for debugging
+                logger.debug(f"Error processing message for token count: {e}")
+                continue
         
         # Get context window size for current model
         context_window = self._get_context_window_size(config.model_name)
+        
+        # Ensure we don't divide by zero
+        if context_window <= 0:
+            context_window = 131072  # Default fallback
         
         # Calculate percentage used
         usage_percentage = (total_tokens / context_window) * 100
@@ -506,12 +526,39 @@ Use `/command` for controlling the CLI client:
             logger.debug(f"Error calculating context usage: {e}")
             return "[dim]Context: Unknown[/dim]"
 
+    def _get_context_status_plain(self) -> str:
+        """Get a plain text version of context status for prompt integration."""
+        try:
+            used_tokens, total_tokens, usage_percentage = self._calculate_context_usage()
+            remaining_percentage = 100 - usage_percentage
+            
+            # Choose emoji based on usage
+            if remaining_percentage > 70:
+                emoji = "🟢"
+            elif remaining_percentage > 40:
+                emoji = "🟡"
+            elif remaining_percentage > 20:
+                emoji = "🟠"
+            else:
+                emoji = "🔴"
+            
+            # Format the display with token count for more detail
+            if used_tokens < 1000:
+                token_display = f"{used_tokens}"
+            else:
+                token_display = f"{used_tokens/1000:.1f}K"
+            
+            total_display = f"{total_tokens//1000}K"
+            
+            return f"{emoji} {remaining_percentage:.0f}% Context Left ({token_display}/{total_display})"
+            
+        except Exception as e:
+            logger.debug(f"Error calculating context usage: {e}")
+            return "Context: Unknown"
+
     def _get_user_input(self) -> str:
         """Get user input with rich prompt and command auto-completion."""
         try:
-            # Get context status for display
-            context_status = self._get_context_status_display()
-            
             # Check if context is getting low and show warning
             _, _, usage_percentage = self._calculate_context_usage()
             if usage_percentage > 95:  # More than 95% used
@@ -519,13 +566,16 @@ Use `/command` for controlling the CLI client:
             elif usage_percentage > 80:  # More than 80% used
                 self.console.print(f"\n[yellow]⚠️  Warning: Context window is {usage_percentage:.0f}% full. Consider using [bold]/clear[/bold] to reset.[/yellow]")
             
-            # Display context status before the prompt
-            self.console.print(context_status, end=" ")
+            # Get context status for prompt (plain text version)
+            context_status = self._get_context_status_plain()
+            
+            # Create prompt with context status included
+            prompt_html = f"{context_status} <ansicyan><b>You</b></ansicyan>: "
             
             session: PromptSession = PromptSession(
                 completer=SlashCommandCompleter(list(command_registry.commands.keys()))
             )
-            user_input = session.prompt(HTML("<ansicyan><b>You</b></ansicyan>: "))
+            user_input = session.prompt(HTML(prompt_html))
             return user_input.strip()
         except (KeyboardInterrupt, EOFError):
             self.console.print("\n[yellow]Session ended by user[/yellow]")
