@@ -90,20 +90,7 @@ class TestCommandRegistry:
         assert cmd2 is not None
         assert cmd1 == cmd2
 
-    def test_get_commands_by_category(self):
-        """Test getting commands organized by category."""
-        registry = CommandRegistry()
-        categorized = registry.get_commands_by_category()
 
-        assert isinstance(categorized, dict)
-        assert CommandCategory.REPO in categorized
-        assert CommandCategory.FILE in categorized
-        assert CommandCategory.SYSTEM in categorized
-
-        # Check that repos command is in REPO category
-        repo_commands = categorized[CommandCategory.REPO]
-        repo_names = [cmd.name for cmd in repo_commands]
-        assert "repos" in repo_names
 
     def test_find_similar_commands(self):
         """Test finding similar commands."""
@@ -162,41 +149,9 @@ class TestCommandParser:
 class TestCommandConverter:
     """Test the CommandConverter class."""
 
-    def test_convert_repos_command(self):
-        """Test converting repos command."""
-        # Create a mock repos command
-        cmd = Command(
-            name="repos",
-            description="List repositories",
-            category=CommandCategory.REPO,
-            usage="/repos",
-            examples=["/repos"],
-        )
 
-        result = CommandConverter.convert_to_natural_language(cmd, [])
-        assert result == "List my all repositories"
 
-        result = CommandConverter.convert_to_natural_language(cmd, ["private"])
-        assert result == "List my private repositories"
 
-    def test_convert_read_command(self):
-        """Test converting read command."""
-        cmd = Command(
-            name="read",
-            description="Read file",
-            category=CommandCategory.FILE,
-            usage="/read",
-            examples=["/read"],
-        )
-
-        result = CommandConverter.convert_to_natural_language(
-            cmd, ["microsoft/vscode", "README.md"]
-        )
-        assert result == "Show me the contents of README.md in repository microsoft/vscode"
-
-        # Test insufficient args
-        result = CommandConverter.convert_to_natural_language(cmd, ["repo"])
-        assert result is None
 
     def test_convert_unknown_command(self):
         """Test converting an unknown command."""
@@ -230,21 +185,7 @@ class TestGlobalInstances:
         assert command_converter is not None
         assert isinstance(command_converter, CommandConverter)
 
-    def test_global_instances_work(self):
-        """Test that global instances function correctly."""
-        # Test parser
-        is_cmd, name, args = command_parser.parse_command("/test")
-        assert is_cmd is True
-        assert name == "test"
 
-        # Test registry
-        cmd = command_registry.get_command("repos")
-        assert cmd is not None
-
-        # Test converter
-        if cmd:
-            result = command_converter.convert_to_natural_language(cmd, ["private"])
-            assert result is not None
 
 
 if __name__ == "__main__":

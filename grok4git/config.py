@@ -259,5 +259,20 @@ MAX_REVIEW_ITERATIONS={self.max_review_iterations}
         logger.info(f"Logging level set to {self.log_level}")
 
 
-# Global configuration instance
-config = Config()
+# Global configuration instance (lazy initialization)
+_config_instance = None
+
+def get_config() -> Config:
+    """Get the global configuration instance (lazy initialization)."""
+    global _config_instance
+    if _config_instance is None:
+        _config_instance = Config()
+    return _config_instance
+
+# For backward compatibility, create a property-like access
+class ConfigProxy:
+    """Proxy object that provides lazy access to config properties."""
+    def __getattr__(self, name):
+        return getattr(get_config(), name)
+
+config = ConfigProxy()
