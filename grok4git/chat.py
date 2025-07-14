@@ -82,7 +82,14 @@ class GrokChat:
                 "- For PRs: Branch names must be unique and descriptive (e.g., 'feature/add-logging' or 'fix/auth-bug')\n"
                 "- File paths should be relative to repo root (e.g., 'src/main.py' not '/src/main.py')\n"
                 "- Repository names must be in 'owner/repo' format\n"
-                "- Always explain what you're doing before using destructive operations"
+                "- Always explain what you're doing before using destructive operations\n\n"
+                "PEER REVIEW FEEDBACK HANDLING:\n"
+                "- When creating pull requests, you may receive peer review feedback from a second AI agent\n"
+                "- If you receive feedback with 'action: request_changes', analyze the suggestions carefully\n"
+                "- Implement the requested changes by modifying your code/files accordingly\n"
+                "- After making changes, create a new pull request with the improvements\n"
+                "- The peer review process is iterative - continue improving until approval is received\n"
+                "- Always acknowledge and address specific feedback points in your responses"
             ),
         }
         self.messages.append(system_message)
@@ -92,8 +99,6 @@ class GrokChat:
         welcome_text = """
 # Welcome to Grok4Git! 🚀
 
-I'm your AI assistant for GitHub operations. I can help you with:
-
 ### 💬 **Natural Language**
 Just type your request in plain English, and I'll help you out!
 
@@ -102,6 +107,8 @@ Use `/command` syntax for quick actions:
 - `/repos` - List your repositories
 - `/read owner/repo file.py` - Read a file
 - `/commits owner/repo` - Show commit history
+- `/peer-review-toggle` - Enable/disable peer review
+- `/peer-review-status` - Show peer review settings
 - `/help` - Show all available commands
 
 ### 🎯 **What I Can Do**
@@ -109,6 +116,7 @@ Use `/command` syntax for quick actions:
 - File operations and content reading
 - Commit review and diff analysis
 - Pull request creation and management
+- **Peer review system** - Second AI agent reviews PRs before submission
 - Issue tracking and creation
 - Branch operations and history
 

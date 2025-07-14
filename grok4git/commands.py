@@ -224,6 +224,22 @@ class CommandRegistry:
                 examples=["/model grok-4", "/model grok-4-0709"],
                 aliases=["switch-model"],
             ),
+            Command(
+                name="peer-review-toggle",
+                description="Enable or disable peer review for pull requests",
+                category=CommandCategory.SYSTEM,
+                usage="/peer-review-toggle [enable|disable]",
+                examples=["/peer-review-toggle enable", "/peer-review-toggle disable", "/peer-review-toggle"],
+                aliases=["peer-toggle", "pr-review-toggle"],
+            ),
+            Command(
+                name="peer-review-status",
+                description="Show current peer review configuration",
+                category=CommandCategory.SYSTEM,
+                usage="/peer-review-status",
+                examples=["/peer-review-status"],
+                aliases=["peer-status", "pr-review-status"],
+            ),
         ]
 
         for cmd in commands:
@@ -447,6 +463,21 @@ class CommandConverter:
             issue_number = args[1]
             comment = " ".join(args[2:])
             return f"Add comment '{comment}' to issue #{issue_number} in repository {repo}"
+
+        elif cmd.name == "peer-review-toggle":
+            if not args:
+                return "Show current peer review status and toggle settings"
+            
+            action = args[0].lower()
+            if action in ["enable", "on", "true"]:
+                return "Enable peer review for pull requests"
+            elif action in ["disable", "off", "false"]:
+                return "Disable peer review for pull requests"
+            else:
+                return "Show current peer review status and toggle settings"
+
+        elif cmd.name == "peer-review-status":
+            return "Show current peer review configuration and settings"
 
         return None
 

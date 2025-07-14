@@ -81,6 +81,21 @@ class Config:
         """Get GitHub API version."""
         return os.getenv("GITHUB_API_VERSION", "2022-11-28")
 
+    @property
+    def pr_peer_review_enabled(self) -> bool:
+        """Get whether peer review is enabled for pull requests."""
+        return os.getenv("ENABLE_PR_PEER_REVIEW", "false").lower() == "true"
+
+    @property
+    def peer_review_model(self) -> str:
+        """Get the AI model to use for peer review (defaults to main model)."""
+        return os.getenv("PEER_REVIEW_MODEL", self.model_name)
+
+    @property
+    def max_review_iterations(self) -> int:
+        """Get maximum number of review iterations allowed."""
+        return int(os.getenv("MAX_REVIEW_ITERATIONS", "3"))
+
     def _ensure_env_setup(self) -> None:
         """Ensure environment variables are set up, prompt user if missing."""
         # Check if .env exists, if not, check if .env.example exists and copy it
@@ -186,6 +201,15 @@ API_TIMEOUT={self.api_timeout}
 
 # Optional: GitHub API version
 GITHUB_API_VERSION={self.github_api_version}
+
+# Optional: Enable peer review for pull requests
+ENABLE_PR_PEER_REVIEW={str(self.pr_peer_review_enabled).lower()}
+
+# Optional: AI model to use for peer review (defaults to main model)
+PEER_REVIEW_MODEL={self.peer_review_model}
+
+# Optional: Maximum number of review iterations
+MAX_REVIEW_ITERATIONS={self.max_review_iterations}
 """
 
         with open(".env", "w") as f:

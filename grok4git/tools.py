@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 
 from .config import config
 from .github_api import github_api
+from .peer_review import create_peer_review_context, PeerReviewOrchestrator, PeerReviewResult
 
 logger = logging.getLogger(__name__)
 # Set tools logger to WARNING level by default to reduce clutter unless in debug mode
@@ -224,6 +225,7 @@ def create_pull_request(
     files: List[Dict[str, str]],
     commit_message: str,
     base_branch: Optional[str] = None,
+    enable_peer_review: Optional[bool] = None,
 ) -> str:
     """
     Create a pull request in a GitHub repository with changes to multiple files.
@@ -236,6 +238,7 @@ def create_pull_request(
         files: List of files to update/create with their content
         commit_message: Commit message for the changes
         base_branch: Base branch (defaults to repository's default branch)
+        enable_peer_review: Enable peer review (defaults to config setting)
 
     Returns:
         URL of the created pull request or error message
@@ -245,6 +248,60 @@ def create_pull_request(
     try:
         if not files or not isinstance(files, list) or len(files) == 0:
             return "Error: 'files' must be a non-empty list"
+
+        # Determine if peer review should be enabled
+        if enable_peer_review is None:
+            enable_peer_review = config.pr_peer_review_enabled
+        
+        # If peer review is enabled, create context and orchestrate review
+        if enable_peer_review:
+            logger.info("Peer review enabled - initiating peer review process")
+            
+            try:
+                # Create peer review context
+                review_context = create_peer_review_context(
+                    repo=repo,
+                    title=title,
+                    body=body,
+                    files=files,
+                    commit_message=commit_message,
+                    branch_name=new_branch,
+                    base_branch=base_branch
+                )
+                
+                # Orchestrate peer review
+                orchestrator = PeerReviewOrchestrator()
+                review_result = orchestrator.orchestrate_review(review_context)
+                
+                if not review_result.should_proceed:
+                    # Return feedback to main agent for iteration
+                    return review_result.to_agent_message()
+                
+                logger.info("Peer review completed successfully - proceeding with GitHub submission")
+                
+            except Exception as e:
+                logger.error(f"Peer review system failed: {str(e)}")
+                
+                # Fallback: Ask user whether to proceed without peer review
+                from rich.console import Console
+                from rich.prompt import Prompt
+                
+                console = Console()
+                console.print(f"[red]❌ Peer review system failed: {str(e)}[/red]")
+                
+                choice = Prompt.ask(
+                    "Would you like to proceed with PR creation without peer review?",
+                    choices=["y", "n"],
+                    default="y"
+                )
+                
+                if choice != "y":
+                    return "Pull request creation cancelled due to peer review failure"
+                
+                logger.info("Proceeding with PR creation without peer review after failure")
+                console.print("[yellow]⚠️  Proceeding without peer review due to system failure[/yellow]")
+        else:
+            logger.info("Peer review disabled - proceeding directly with GitHub submission")
 
         # Validate repository access and permissions upfront
         try:
@@ -930,6 +987,221 @@ def add_issue_comment(repo: str, issue_number: int, comment: str) -> str:
     return f"Comment added to issue #{issue_number} in {repo}."
 
 
+def review_pull_request(
+    repo: str,
+    title: str,
+    body: str,
+    files: List[Dict[str, str]],
+    commit_message: str,
+    branch_name: str,
+    base_branch: Optional[str] = None,
+) -> str:
+    """
+    Review a pull request using the peer review agent.
+    
+    Args:
+        repo: Repository name in format 'owner/repo'
+        title: Pull request title
+        body: Pull request description
+        files: List of files with their content
+        commit_message: Commit message
+        branch_name: Branch name for the PR
+        base_branch: Base branch (optional)
+    
+    Returns:
+        JSON string with review results
+    """
+    logger.info(f"Starting peer review for PR: {title} in {repo}")
+    
+    try:
+        # Create review context
+        review_context = create_peer_review_context(
+            repo=repo,
+            title=title,
+            body=body,
+            files=files,
+            commit_message=commit_message,
+            branch_name=branch_name,
+            base_branch=base_branch
+        )
+        
+        # Initialize peer review agent
+        from .peer_review import PeerReviewAgent
+        peer_agent = PeerReviewAgent()
+        
+        # Perform review
+        decision, feedback, suggestions = peer_agent.review_pull_request(review_context)
+        
+        # Format response
+        review_result = {
+            "decision": decision.value,
+            "feedback": feedback,
+            "suggestions": suggestions,
+            "repo": repo,
+            "title": title,
+            "branch_name": branch_name
+        }
+        
+        logger.info(f"Peer review completed with decision: {decision.value}")
+        return json.dumps(review_result)
+        
+    except Exception as e:
+        error_msg = f"Error during peer review: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+
+def approve_pull_request(
+    repo: str,
+    title: str,
+    body: str,
+    files: List[Dict[str, str]],
+    commit_message: str,
+    branch_name: str,
+    base_branch: Optional[str] = None,
+) -> str:
+    """
+    Approve and submit a pull request to GitHub after peer review.
+    
+    Args:
+        repo: Repository name in format 'owner/repo'
+        title: Pull request title
+        body: Pull request description
+        files: List of files with their content
+        commit_message: Commit message
+        branch_name: Branch name for the PR
+        base_branch: Base branch (optional)
+    
+    Returns:
+        URL of the created pull request or error message
+    """
+    logger.info(f"Approving and submitting PR: {title} in {repo}")
+    
+    try:
+        # Call create_pull_request with peer review disabled to avoid recursion
+        result = create_pull_request(
+            repo=repo,
+            title=title,
+            body=body,
+            new_branch=branch_name,
+            files=files,
+            commit_message=commit_message,
+            base_branch=base_branch,
+            enable_peer_review=False  # Disable peer review since we're already in review process
+        )
+        
+        logger.info(f"PR approved and submitted: {result}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error submitting approved PR: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+
+def request_pr_changes(
+    repo: str,
+    title: str,
+    feedback: str,
+    suggestions: List[str],
+    current_iteration: int = 1,
+) -> str:
+    """
+    Request changes for a pull request based on peer review feedback.
+    
+    Args:
+        repo: Repository name in format 'owner/repo'
+        title: Pull request title
+        feedback: Peer review feedback
+        suggestions: List of specific suggestions
+        current_iteration: Current review iteration number
+    
+    Returns:
+        Formatted feedback for the original agent
+    """
+    logger.info(f"Requesting changes for PR: {title} in {repo}")
+    
+    try:
+        # Format the change request
+        change_request = {
+            "action": "request_changes",
+            "repo": repo,
+            "title": title,
+            "feedback": feedback,
+            "suggestions": suggestions,
+            "iteration": current_iteration,
+            "message": (
+                f"Peer review feedback for PR '{title}' in {repo}:\n\n"
+                f"**Feedback:** {feedback}\n\n"
+                f"**Suggestions:**\n"
+                + "\n".join(f"- {suggestion}" for suggestion in suggestions)
+            )
+        }
+        
+        logger.info(f"Change request created for iteration {current_iteration}")
+        return json.dumps(change_request)
+        
+    except Exception as e:
+        error_msg = f"Error creating change request: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+
+def iterate_pull_request(
+    repo: str,
+    title: str,
+    body: str,
+    files: List[Dict[str, str]],
+    commit_message: str,
+    branch_name: str,
+    base_branch: Optional[str] = None,
+    feedback_context: Optional[str] = None,
+) -> str:
+    """
+    Create an improved version of a pull request based on peer review feedback.
+    This is used by the main agent to iterate on PRs after receiving feedback.
+    
+    Args:
+        repo: Repository name in format 'owner/repo'
+        title: Pull request title (can be updated)
+        body: Pull request description (can be updated)
+        files: Updated list of files with improvements
+        commit_message: Updated commit message
+        branch_name: New branch name for the iteration
+        base_branch: Base branch (optional)
+        feedback_context: Previous peer review feedback (optional)
+    
+    Returns:
+        Result of the improved pull request creation
+    """
+    logger.info(f"Iterating on PR: {title} in {repo}")
+    
+    try:
+        # Add feedback context to the PR description if provided
+        if feedback_context:
+            body = f"{body}\n\n---\n**Peer Review Iteration:**\nAddressed feedback: {feedback_context}"
+        
+        # Create the improved pull request with peer review enabled
+        result = create_pull_request(
+            repo=repo,
+            title=title,
+            body=body,
+            new_branch=branch_name,
+            files=files,
+            commit_message=commit_message,
+            base_branch=base_branch,
+            enable_peer_review=True  # Always enable peer review for iterations
+        )
+        
+        logger.info(f"PR iteration completed: {result}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error iterating on PR: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+
 # Tool definitions for the AI
 TOOLS = [
     {
@@ -990,7 +1262,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "create_pull_request",
-            "description": "Create a pull request with file changes. WORKFLOW: (1) Creates new branch, (2) Commits all files to that branch, (3) Opens PR from new branch to base branch. AUTOMATICALLY HANDLES: Empty repositories (creates files on new branch), nested directory creation (via GitHub Tree API), and comprehensive error recovery. IMPORTANT: Branch name must be unique and use only letters, numbers, hyphens, underscores. Max file size 1MB each.",
+            "description": "Create a pull request with file changes. WORKFLOW: (1) Creates new branch, (2) Commits all files to that branch, (3) Optional peer review by second AI agent, (4) Opens PR from new branch to base branch. AUTOMATICALLY HANDLES: Empty repositories (creates files on new branch), nested directory creation (via GitHub Tree API), and comprehensive error recovery. PEER REVIEW: When enabled, a second AI agent reviews the PR before GitHub submission for improved code quality. IMPORTANT: Branch name must be unique and use only letters, numbers, hyphens, underscores. Max file size 1MB each.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1035,6 +1307,11 @@ TOOLS = [
                     "base_branch": {
                         "type": "string",
                         "description": "Target branch for PR (defaults to repo's default branch like 'main' or 'master')",
+                        "default": None,
+                    },
+                    "enable_peer_review": {
+                        "type": "boolean",
+                        "description": "Enable peer review by second AI agent before GitHub submission (defaults to config setting)",
                         "default": None,
                     },
                 },
@@ -1310,6 +1587,196 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_pull_request",
+            "description": "Review a pull request using the peer review agent before GitHub submission.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name in format 'owner/repo'",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Pull request title",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Pull request description",
+                    },
+                    "files": {
+                        "type": "array",
+                        "description": "List of files with their content",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "new_content": {"type": "string"},
+                            },
+                            "required": ["file_path", "new_content"],
+                        },
+                    },
+                    "commit_message": {
+                        "type": "string",
+                        "description": "Commit message",
+                    },
+                    "branch_name": {
+                        "type": "string",
+                        "description": "Branch name for the PR",
+                    },
+                    "base_branch": {
+                        "type": "string",
+                        "description": "Base branch (optional)",
+                        "default": None,
+                    },
+                },
+                "required": ["repo", "title", "body", "files", "commit_message", "branch_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_pull_request",
+            "description": "Approve and submit a pull request to GitHub after peer review approval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name in format 'owner/repo'",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Pull request title",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Pull request description",
+                    },
+                    "files": {
+                        "type": "array",
+                        "description": "List of files with their content",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "new_content": {"type": "string"},
+                            },
+                            "required": ["file_path", "new_content"],
+                        },
+                    },
+                    "commit_message": {
+                        "type": "string",
+                        "description": "Commit message",
+                    },
+                    "branch_name": {
+                        "type": "string",
+                        "description": "Branch name for the PR",
+                    },
+                    "base_branch": {
+                        "type": "string",
+                        "description": "Base branch (optional)",
+                        "default": None,
+                    },
+                },
+                "required": ["repo", "title", "body", "files", "commit_message", "branch_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "request_pr_changes",
+            "description": "Request changes for a pull request based on peer review feedback.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name in format 'owner/repo'",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Pull request title",
+                    },
+                    "feedback": {
+                        "type": "string",
+                        "description": "Peer review feedback",
+                    },
+                    "suggestions": {
+                        "type": "array",
+                        "description": "List of specific suggestions",
+                        "items": {"type": "string"},
+                    },
+                    "current_iteration": {
+                        "type": "integer",
+                        "description": "Current review iteration number",
+                        "default": 1,
+                    },
+                },
+                "required": ["repo", "title", "feedback", "suggestions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "iterate_pull_request",
+            "description": "Create an improved version of a pull request based on peer review feedback. Use this after receiving feedback from peer review to implement suggestions and resubmit the PR.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name in format 'owner/repo'",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Pull request title (can be updated based on feedback)",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Pull request description (can be updated based on feedback)",
+                    },
+                    "files": {
+                        "type": "array",
+                        "description": "Updated list of files with improvements based on peer review feedback",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "new_content": {"type": "string"},
+                            },
+                            "required": ["file_path", "new_content"],
+                        },
+                    },
+                    "commit_message": {
+                        "type": "string",
+                        "description": "Updated commit message reflecting the changes made",
+                    },
+                    "branch_name": {
+                        "type": "string",
+                        "description": "New branch name for the iteration (should be different from previous attempts)",
+                    },
+                    "base_branch": {
+                        "type": "string",
+                        "description": "Base branch (optional)",
+                        "default": None,
+                    },
+                    "feedback_context": {
+                        "type": "string",
+                        "description": "Previous peer review feedback being addressed (optional)",
+                        "default": None,
+                    },
+                },
+                "required": ["repo", "title", "body", "files", "commit_message", "branch_name"],
+            },
+        },
+    },
 ]
 
 
@@ -1332,4 +1799,8 @@ TOOL_FUNCTIONS = {
     "create_repository": create_repository,
     "merge_pull_request": merge_pull_request,
     "add_issue_comment": add_issue_comment,
+    "review_pull_request": review_pull_request,
+    "approve_pull_request": approve_pull_request,
+    "request_pr_changes": request_pr_changes,
+    "iterate_pull_request": iterate_pull_request,
 }
