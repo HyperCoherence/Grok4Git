@@ -77,6 +77,211 @@ def search_github_repos(query: str) -> str:
         return error_msg
 
 
+def get_bulk_codebase_overview(repo: str, branch: Optional[str] = None, max_files: int = 20) -> str:
+    """
+    Get an overview of a codebase by reading multiple relevant files in a structured format.
+    
+    Automatically discovers and reads important files like README, config files, main source files,
+    and provides a comprehensive overview of the repository structure and content.
+
+    Args:
+        repo: Repository name in format 'owner/repo'
+        branch: Branch name (defaults to repository's default branch)
+        max_files: Maximum number of files to read (default: 20)
+
+    Returns:
+        Structured blob containing overview of the codebase
+    """
+    logger.info(f"Getting codebase overview: {repo} (max {max_files} files) on branch {branch}")
+
+    try:
+        if branch is None:
+            branch = github_api.get_default_branch(repo)
+
+        # Get repository structure
+        structure_result = recursive_list_directory(repo, "", branch)
+        
+        # Parse the structure to find important files
+        important_files = []
+        
+        # Priority files (always include if they exist)
+        priority_patterns = [
+            "README.md", "README.rst", "README.txt", "README",
+            "package.json", "requirements.txt", "setup.py", "pyproject.toml",
+            "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
+            "Dockerfile", "docker-compose.yml",
+            ".env.example", "config.yml", "config.yaml", "config.json",
+            "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"
+        ]
+        
+        # Source file patterns (include some examples)
+        source_patterns = [
+            r"\.py$", r"\.js$", r"\.ts$", r"\.jsx$", r"\.tsx$",
+            r"\.go$", r"\.rs$", r"\.java$", r"\.cpp$", r"\.c$",
+            r"\.rb$", r"\.php$", r"\.swift$", r"\.kt$"
+        ]
+        
+        try:
+            import json
+            import re
+            
+            # Parse directory structure
+            files_data = json.loads(structure_result)
+            all_files = []
+            
+            def extract_files(items, current_path=""):
+                for item in items:
+                    if item["type"] == "file":
+                        full_path = f"{current_path}/{item['name']}" if current_path else item['name']
+                        all_files.append(full_path)
+                    elif item["type"] == "dir" and "children" in item:
+                        new_path = f"{current_path}/{item['name']}" if current_path else item['name']
+                        extract_files(item["children"], new_path)
+            
+            extract_files(files_data)
+            
+            # Find priority files
+            for pattern in priority_patterns:
+                matches = [f for f in all_files if f.lower().endswith(pattern.lower()) or f.split('/')[-1].lower() == pattern.lower()]
+                important_files.extend(matches[:2])  # Max 2 of each type
+            
+            # Find some source files (avoid test files)
+            source_files = []
+            for pattern in source_patterns:
+                matches = [f for f in all_files if re.search(pattern, f, re.IGNORECASE) 
+                          and not re.search(r'(test|spec|__pycache__|\.git)', f, re.IGNORECASE)]
+                source_files.extend(matches[:3])  # Max 3 of each type
+            
+            # Add source files, prioritizing root level and main directories
+            source_files.sort(key=lambda x: (x.count('/'), len(x)))
+            important_files.extend(source_files[:max_files-len(important_files)])
+            
+        except Exception as e:
+            logger.warning(f"Error parsing repository structure: {e}")
+            # Fallback to common files
+            important_files = ["README.md", "package.json", "requirements.txt", "setup.py"]
+        
+        # Remove duplicates and limit to max_files
+        important_files = list(dict.fromkeys(important_files))[:max_files]
+        
+        if not important_files:
+            return f"No relevant files found in {repo} for codebase overview."
+        
+        # Use bulk file reader to get content
+        return get_bulk_file_content(repo, important_files, branch)
+
+    except Exception as e:
+        error_msg = f"Error getting codebase overview from {repo}: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+
+def get_bulk_file_content(repo: str, paths: List[str], branch: Optional[str] = None) -> str:
+    """
+    Get the content of multiple files in a GitHub repository as a single structured blob.
+    
+    This is more efficient than reading files individually and gives better context
+    about the codebase structure. Files that are too large are skipped with a note.
+
+    Args:
+        repo: Repository name in format 'owner/repo'
+        paths: List of file paths to read
+        branch: Branch name (defaults to repository's default branch)
+
+    Returns:
+        Structured blob containing all file contents with separators
+    """
+    logger.info(f"Getting bulk file content: {repo} - {len(paths)} files on branch {branch}")
+
+    try:
+        if branch is None:
+            branch = github_api.get_default_branch(repo)
+
+        max_size_bytes = config.max_file_size_mb * 1024 * 1024
+        successful_files = []
+        skipped_files = []
+        error_files = []
+        
+        # Process each file
+        for path in paths:
+            try:
+                url = f"{config.github_api_base_url}/repos/{repo}/contents/{path}"
+                response = github_api.make_request("GET", url, params={"ref": branch})
+                data = response.json()
+
+                # Check if it's a directory
+                if isinstance(data, list):
+                    error_files.append(f"{path} (directory)")
+                    continue
+
+                # Check file size
+                file_size = data.get("size", 0)
+                if file_size > max_size_bytes:
+                    size_mb = file_size / (1024 * 1024)
+                    skipped_files.append(f"{path} ({size_mb:.1f}MB)")
+                    continue
+
+                # Check if content is available
+                if "content" not in data:
+                    error_files.append(f"{path} (content not available)")
+                    continue
+
+                # Decode base64 content
+                content = data["content"]
+                try:
+                    decoded_content = base64.b64decode(content).decode('utf-8')
+                    successful_files.append((path, decoded_content))
+                except (UnicodeDecodeError, base64.binascii.Error):
+                    error_files.append(f"{path} (binary/decode error)")
+                    continue
+
+            except Exception as e:
+                error_files.append(f"{path} (error: {str(e)})")
+                continue
+
+        # Build structured output
+        result = []
+        
+        if successful_files:
+            result.append(f"=== BULK FILE CONTENT: {repo} (branch: {branch}) ===\n")
+            result.append(f"Successfully read {len(successful_files)} files:\n")
+            
+            for path, content in successful_files:
+                result.append(f"\n{'='*60}")
+                result.append(f"FILE: {path}")
+                result.append(f"{'='*60}")
+                result.append(content)
+                result.append(f"{'='*60}")
+                result.append(f"END OF FILE: {path}")
+                result.append(f"{'='*60}\n")
+        
+        # Add notes about skipped/error files
+        if skipped_files:
+            result.append(f"\n📁 SKIPPED FILES (too large, max {config.max_file_size_mb}MB):")
+            for skipped in skipped_files:
+                result.append(f"  - {skipped}")
+            result.append(f"\n💡 Use get_file_content() to read these files individually.\n")
+        
+        if error_files:
+            result.append(f"\n❌ ERROR FILES (could not read):")
+            for error in error_files:
+                result.append(f"  - {error}")
+            result.append("")
+        
+        if not successful_files and not skipped_files and not error_files:
+            return f"No files found in {repo} for the specified paths."
+        
+        final_result = "\n".join(result)
+        
+        logger.info(f"Bulk file read completed: {len(successful_files)} successful, {len(skipped_files)} skipped, {len(error_files)} errors")
+        return final_result
+
+    except Exception as e:
+        error_msg = f"Error getting bulk file content from {repo}: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+
 def get_file_content(repo: str, path: str, branch: Optional[str] = None) -> str:
     """
     Get the content of a file in a GitHub repository.
@@ -1238,8 +1443,60 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_bulk_codebase_overview",
+            "description": "Get an intelligent overview of a codebase by automatically discovering and reading important files (README, config, main source files) in a structured format. Best for understanding new repositories quickly.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name, e.g., username/repo",
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name (optional, defaults to repository's default branch)",
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum number of files to read (default: 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["repo"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bulk_file_content",
+            "description": "Get the content of multiple specific files in a GitHub repository as a single structured blob. More efficient than reading files individually and provides better context about codebase structure.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository name, e.g., username/repo",
+                    },
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths to read",
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name (optional, defaults to repository's default branch)",
+                    },
+                },
+                "required": ["repo", "paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_file_content",
-            "description": "Get the content of a file in a GitHub repository.",
+            "description": "Get the content of a single file in a GitHub repository.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1784,6 +2041,8 @@ TOOLS = [
 TOOL_FUNCTIONS = {
     "list_github_repos": list_github_repos,
     "search_github_repos": search_github_repos,
+    "get_bulk_codebase_overview": get_bulk_codebase_overview,
+    "get_bulk_file_content": get_bulk_file_content,
     "get_file_content": get_file_content,
     "create_pull_request": create_pull_request,
     "list_repo_branches": list_repo_branches,
