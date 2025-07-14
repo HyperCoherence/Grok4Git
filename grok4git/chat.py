@@ -99,17 +99,22 @@ class GrokChat:
         welcome_text = """
 # Welcome to Grok4Git! 🚀
 
-### 💬 **Natural Language**
-Just type your request in plain English, and I'll help you out!
+### 💬 **Natural Language** (Primary Interface)
+Just type your request in plain English for GitHub operations:
+- "Show me the README for microsoft/vscode"
+- "Create a new repository called my-project"
+- "List recent commits in my-repo"
+- "Create a pull request for my feature"
 
-### ⚡ **Slash Commands** (New!)
-Use `/command` syntax for quick actions:
-- `/repos` - List your repositories
-- `/read owner/repo file.py` - Read a file
-- `/commits owner/repo` - Show commit history
+### ⚡ **Slash Commands** (Client Control)
+Use `/command` for controlling the CLI client:
+- `/help` - Show help
+- `/clear` - Clear chat history
+- `/exit` - Exit application
+- `/model <name>` - Switch AI model
+- `/repos` - Quick list of your repositories
 - `/peer-review-toggle` - Enable/disable peer review
 - `/peer-review-status` - Show peer review settings
-- `/help` - Show all available commands
 
 ### 🎯 **What I Can Do**
 - Repository management and analysis
@@ -120,12 +125,17 @@ Use `/command` syntax for quick actions:
 - Issue tracking and creation
 - Branch operations and history
 
+### 🔄 **How It Works**
+- **Natural language** → AI Agent → GitHub operations
+- **Slash commands** → Direct client control (no AI needed)
+
 ### ⚡ **Pro Tips**
 - **Ctrl+C** to interrupt long-running requests
-- I might need a few minutes to think through complex requests
-- Try `/help` to see all commands
+- Use natural language for GitHub operations
+- Use slash commands only for client control
+- Try `/help` to see all available commands
 
-**Quick Start**: Try `/help` to see all commands, or just ask me anything!
+**Quick Start**: Ask me "List my repositories" or try `/repos` for a quick list!
         """
 
         self.console.print(
@@ -195,17 +205,25 @@ Use `/command` syntax for quick actions:
             help_content += "\n"
 
         help_content += """
-## Tips
+## Usage Guidelines
+- **Slash commands** are for client control only
+- **Natural language** is for GitHub operations
 - Use `/help <command>` for detailed help on a specific command
 - Commands are case-insensitive and support aliases
-- You can also use natural language - just describe what you want to do!
 
 ## Examples
 ```
-/repos                          # List all repositories
-/read microsoft/vscode README.md  # Read a file
-/commits my-user/my-app         # Show commit history
-/help pr                        # Get help for PR commands
+# Client Control (slash commands)
+/repos                          # Quick list of repositories
+/model grok-4                   # Switch AI model
+/peer-review-toggle enable      # Enable peer review
+/clear                          # Clear chat history
+
+# GitHub Operations (natural language)
+"Show me the README for microsoft/vscode"
+"Create a new repository called my-project"
+"List recent commits in my-repo"
+"Create a pull request for my feature"
 ```
         """
 
@@ -236,7 +254,7 @@ Use `/command` syntax for quick actions:
                 )
             return False
 
-        # Handle system commands directly
+        # Handle client control commands directly
         if cmd.name == "help":
             help_cmd = args[0] if args else None
             self._display_command_help(help_cmd)
@@ -253,21 +271,55 @@ Use `/command` syntax for quick actions:
             self.console.print("[yellow]👋 Goodbye![/yellow]")
             return True
 
-        # Convert slash command to natural language for AI
-        natural_language = command_converter.convert_to_natural_language(cmd, args)
+        elif cmd.name == "model":
+            if not args:
+                self.console.print(f"[red]Model name required[/red]")
+                self.console.print(f"[yellow]Usage: [bold]{cmd.usage}[/bold][/yellow]")
+                return False
+            
+            old_model = config.model_name
+            config.model_name = args[0]
+            self.console.print(f"[green]✅ Model switched from [bold]{old_model}[/bold] to [bold]{config.model_name}[/bold][/green]")
+            return False
 
-        if natural_language:
-            self.console.print(f"[dim]💭 Interpreting: {natural_language}[/dim]")
-            self.messages.append({"role": "user", "content": natural_language})
-            self._process_ai_response()
-        else:
-            self.console.print(f"[red]Invalid usage of [bold]/{cmd.name}[/bold][/red]")
-            self.console.print(f"[yellow]Usage: [bold]{cmd.usage}[/bold][/yellow]")
-            self.console.print(
-                f"[yellow]Try: [bold]/help {cmd.name}[/bold] for more information[/yellow]"
-            )
+        elif cmd.name == "repos":
+            self._execute_repos_command(args)
+            return False
 
+        # Only peer-review commands need AI processing
+        elif cmd.name in ["peer-review-toggle", "peer-review-status"]:
+            natural_language = command_converter.convert_to_natural_language(cmd, args)
+            if natural_language:
+                self.console.print(f"[dim]💭 Interpreting: {natural_language}[/dim]")
+                self.messages.append({"role": "user", "content": natural_language})
+                self._process_ai_response()
+            else:
+                self.console.print(f"[red]Invalid usage of [bold]/{cmd.name}[/bold][/red]")
+                self.console.print(f"[yellow]Usage: [bold]{cmd.usage}[/bold][/yellow]")
+            return False
+
+        # Unknown command (shouldn't happen due to registry check above)
+        self.console.print(f"[red]Unknown command: [bold]/{command_name}[/bold][/red]")
         return False
+
+    def _execute_repos_command(self, args: List[str]) -> None:
+        """Execute /repos command directly without AI."""
+        from .tools import TOOL_FUNCTIONS
+        
+        try:
+            # Determine repository type
+            repo_type = args[0] if args else "all"
+            
+            # Direct call to GitHub API
+            with Status(f"[cyan]📁 Fetching {repo_type} repositories...", console=self.console):
+                result = TOOL_FUNCTIONS["list_github_repos"](type=repo_type)
+            
+            # Display result directly
+            self.console.print("[bold green]📁 Your Repositories:[/bold green]")
+            self.console.print(result)
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Error fetching repositories: {str(e)}[/red]")
 
     def _get_user_input(self) -> str:
         """Get user input with rich prompt and command auto-completion."""
