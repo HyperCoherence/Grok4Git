@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import urllib.parse
+import difflib  # Added for diff calculations in safeguards
 from typing import Dict, List, Any, Optional
 
 from .config import config
@@ -213,6 +214,36 @@ def _create_files_in_empty_repo(repo: str, files: List[Dict[str, str]], branch: 
         return error_msg
 
 
+def _check_deletion_threshold(original_content: str, new_content: str, threshold: float = 0.2) -> bool:
+    """
+    Check if deletions exceed a threshold percentage of original lines.
+
+    Args:
+        original_content: Original file content
+        new_content: Proposed new content
+        threshold: Max allowed deletion percentage (default 20%)
+
+    Returns:
+        True if deletions are within threshold, False otherwise
+    """
+    original_lines = original_content.splitlines()
+    new_lines = new_content.splitlines()
+
+    diff = list(difflib.unified_diff(original_lines, new_lines, lineterm=''))
+
+    deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+    total_original = len(original_lines)
+
+    if total_original == 0:
+        return True  # New file, no deletions
+
+    deletion_pct = deletions / total_original
+    if deletion_pct > threshold:
+        logger.warning(f"Deletions exceed threshold: {deletion_pct:.2%} (> {threshold:.0%})")
+        return False
+    return True
+
+
 def create_pull_request(
     repo: str,
     title: str,
@@ -322,12 +353,25 @@ def create_pull_request(
         # Prepare tree data - GitHub automatically creates directory structure
         tree = []
         for file_change in files:
+            file_path = file_change["file_path"]
+            new_content = file_change["new_content"]
+
+            # Safeguard: Fetch original content if file exists
+            original_content = get_file_content(repo, file_path, base_branch)
+            if "Error" not in original_content:  # File exists
+                # Check deletion threshold
+                if not _check_deletion_threshold(original_content, new_content):
+                    return f"Error: Proposed changes for '{file_path}' would delete more than 20% of the file. Aborting to prevent unintended large deletions. Please review and provide more conservative changes."
+                logger.info(f"Safeguard passed for {file_path}")
+            else:
+                logger.info(f"New file {file_path}: No safeguard check needed")
+
             tree.append(
                 {
-                    "path": file_change["file_path"],
+                    "path": file_path,
                     "mode": "100644",
                     "type": "blob",
-                    "content": file_change["new_content"],
+                    "content": new_content,
                 }
             )
 
