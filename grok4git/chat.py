@@ -47,7 +47,15 @@ class GrokChat:
     def __init__(self):
         """Initialize the chat interface."""
         self.console = Console()
-        self.client = OpenAI(base_url=config.xai_base_url, api_key=config.xai_api_key)
+        
+        # Suppress httpx logging to keep output clean
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        
+        self.client = OpenAI(
+            base_url=config.xai_base_url, 
+            api_key=config.xai_api_key
+            # No timeout for AI requests - users can manually abort with Ctrl+C
+        )
         self.messages: List[Dict[str, Any]] = []
         self._setup_system_message()
         logger.info("Grok chat interface initialized")
@@ -103,6 +111,11 @@ Use `/command` syntax for quick actions:
 - Pull request creation and management
 - Issue tracking and creation
 - Branch operations and history
+
+### ⚡ **Pro Tips**
+- **Ctrl+C** to interrupt long-running requests
+- I might need a few minutes to think through complex requests
+- Try `/help` to see all commands
 
 **Quick Start**: Try `/help` to see all commands, or just ask me anything!
         """
@@ -306,7 +319,12 @@ Use `/command` syntax for quick actions:
                 return "Operation cancelled by user"
 
         try:
-            with Status(f"[cyan]⚡ Executing {function_name}...", console=self.console):
+            # Create status message with consistent alignment
+            # Pad function name to consistent width for better alignment
+            padded_function_name = f"{function_name}".ljust(25)
+            status_msg = f"[cyan]⚡ Executing {padded_function_name} ->"
+            
+            with Status(status_msg, console=self.console) as status:
                 function_to_call = TOOL_FUNCTIONS.get(function_name)
                 if function_to_call is None:
                     return f"Error: Unknown function {function_name}"
@@ -315,13 +333,112 @@ Use `/command` syntax for quick actions:
                 else:
                     return f"Error: {function_name} is not callable"
 
-            logger.info(f"Tool {function_name} executed successfully")
+                # Extract meaningful info from result for compact display
+                result_summary = self._extract_tool_result_summary(function_name, result, function_args)
+                
+                # Update status with result and checkmark (this shows briefly)
+                status.update(f"[cyan]⚡ Executing {padded_function_name} -> {result_summary} ✅")
+                
+                # Brief pause to show the result
+                import time
+                time.sleep(0.3)
+
+            # Print the final line to make it persistent (after status context ends)
+            self.console.print(f"[cyan]⚡ Executing {padded_function_name} -> {result_summary} ✅")
+
+            # Only log detailed info in debug mode
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.info(f"Tool {function_name} executed successfully")
+                logger.debug(f"Tool result: {result}")
+
             return str(result)
 
         except Exception as e:
             error_msg = f"Error executing {function_name}: {str(e)}"
             logger.error(error_msg)
             return error_msg
+
+    def _extract_tool_result_summary(self, function_name: str, result: str, args: dict) -> str:
+        """Extract a concise summary from tool execution results."""
+        try:
+            # Handle different tool types
+            if function_name == "list_github_repos":
+                # Extract repository count
+                import json
+                try:
+                    repos = json.loads(result)
+                    return f"Found {len(repos)} repositories"
+                except:
+                    return "Listed repositories"
+            
+            elif function_name == "get_repo_info":
+                # Extract repo name
+                repo = args.get("repo", "repository")
+                return f"Got info for {repo}"
+            
+            elif function_name == "recursive_list_directory":
+                # Extract directory and file count
+                repo = args.get("repo", "")
+                path = args.get("path", "")
+                try:
+                    import json
+                    items = json.loads(result)
+                    return f"Listed {len(items)} items in {repo}/{path}"
+                except:
+                    return f"Listed directory {repo}/{path}"
+            
+            elif function_name == "get_commit_history":
+                # Extract commit count
+                repo = args.get("repo", "repository")
+                try:
+                    import json
+                    commits = json.loads(result)
+                    return f"Got {len(commits)} commits from {repo}"
+                except:
+                    return f"Got commit history for {repo}"
+            
+            elif function_name == "manage_issues":
+                # Extract issue info
+                repo = args.get("repo", "repository")
+                action = args.get("action", "managed")
+                if action == "list":
+                    try:
+                        import json
+                        issues = json.loads(result)
+                        return f"Found {len(issues)} issues in {repo}"
+                    except:
+                        return f"Listed issues in {repo}"
+                else:
+                    return f"Issue {action}d in {repo}"
+            
+            elif function_name == "get_file_content":
+                # Extract file info
+                repo = args.get("repo", "")
+                path = args.get("path", "file")
+                return f"Read {repo}/{path}"
+            
+            elif function_name == "create_pull_request":
+                # Extract PR info
+                repo = args.get("repo", "repository")
+                return f"Created PR in {repo}"
+            
+            elif function_name == "search_repositories":
+                # Extract search results
+                query = args.get("query", "")
+                try:
+                    import json
+                    results = json.loads(result)
+                    return f"Found {len(results)} repos for '{query}'"
+                except:
+                    return f"Searched for '{query}'"
+            
+            else:
+                # Generic fallback
+                return "Completed"
+                
+        except Exception as e:
+            logger.debug(f"Error extracting tool summary: {e}")
+            return "Completed"
 
     def _confirm_destructive_operation(
         self, function_name: str, function_args: Dict[str, Any]
@@ -402,10 +519,15 @@ Use `/command` syntax for quick actions:
                 else:
                     self.console.print("[yellow]No response content received[/yellow]")
 
+        except KeyboardInterrupt:
+            self.console.print("\n[yellow]⚠️  Request interrupted by user[/yellow]")
+            self.console.print("[dim]💡 Tip: You can always interrupt long-running requests with Ctrl+C[/dim]")
+            logger.info("AI request interrupted by user")
         except Exception as e:
             error_msg = f"Error processing AI response: {str(e)}"
             logger.error(error_msg)
             self.console.print(f"[red]❌ Error: {error_msg}[/red]")
+            self.console.print("[dim]💡 Tip: You can interrupt requests with Ctrl+C and try again[/dim]")
 
     def run(self) -> None:
         """Run the main chat loop."""

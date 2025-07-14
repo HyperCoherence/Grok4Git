@@ -15,6 +15,9 @@ from .config import config
 from .github_api import github_api
 
 logger = logging.getLogger(__name__)
+# Set tools logger to WARNING level by default to reduce clutter unless in debug mode
+if config.log_level != "DEBUG":
+    logger.setLevel(logging.WARNING)
 
 
 def list_github_repos(type: str = "all") -> str:

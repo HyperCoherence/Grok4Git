@@ -73,7 +73,7 @@ class Config:
 
     @property
     def api_timeout(self) -> int:
-        """Get API timeout in seconds."""
+        """Get API timeout in seconds for GitHub API calls (not AI requests)."""
         return int(os.getenv("API_TIMEOUT", "30"))
 
     @property
@@ -178,7 +178,7 @@ LOG_LEVEL={log_level}
 # Optional: Maximum file size in MB for processing
 MAX_FILE_SIZE_MB={self.max_file_size_mb}
 
-# Optional: API timeout in seconds
+# Optional: API timeout in seconds (for GitHub API calls, not AI requests)
 API_TIMEOUT={self.api_timeout}
 
 # Optional: GitHub API version
