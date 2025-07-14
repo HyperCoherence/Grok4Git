@@ -37,42 +37,6 @@ jobs:
         pip install -r requirements.txt
         pip install autopep8 isort
     
-    - name: Auto-fix code formatting
-      run: |
-        echo "🔧 Auto-fixing code formatting..."
-        
-        # Auto-format with black
-        black .
-        
-        # Auto-fix import sorting
-        isort .
-        
-        # Auto-fix basic PEP8 issues
-        autopep8 --in-place --aggressive --aggressive --recursive .
-        
-        echo "✅ Code formatting completed"
-    
-    - name: Commit auto-fixes
-      if: matrix.python-version == '3.11'  # Only commit once
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        if [[ `git status --porcelain` ]]; then
-          echo "📝 Committing auto-fixes..."
-          git add .
-          git commit -m "🤖 Auto-fix: Format code with black, isort, and autopep8
-          
-          - Applied black formatting
-          - Sorted imports with isort  
-          - Fixed PEP8 issues with autopep8
-          
-          [skip ci]"
-          git push
-          echo "✅ Auto-fixes committed and pushed"
-        else
-          echo "✅ No formatting changes needed"
-        fi
     
     - name: Check for remaining issues
       run: |
