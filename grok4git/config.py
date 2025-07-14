@@ -113,6 +113,9 @@ class Config:
                     == "y"
                 ):
                     self._create_env_file()
+                    # Continue to load the newly created .env file
+                else:
+                    # User declined to create .env file
                     return
 
         # Reload environment variables after potential .env creation
