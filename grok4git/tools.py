@@ -8,6 +8,7 @@ by the AI assistant to perform various GitHub operations.
 import base64
 import json
 import logging
+import difflib  # For patch application and diff validation
 import urllib.parse
 from typing import Dict, List, Any, Optional
 
@@ -322,12 +323,60 @@ def create_pull_request(
         # Prepare tree data - GitHub automatically creates directory structure
         tree = []
         for file_change in files:
+            file_path = file_change["file_path"]
+            
+            # Root-cause fix: Support patch-based updates to prevent overwrites/deletions
+            if "patch" in file_change:
+                # Fetch existing content
+                original_content = get_file_content(repo, file_path, base_branch)
+                if "Error" in original_content:
+                    if "not found" in original_content.lower():
+                        # New file - treat patch as full content
+                        final_content = file_change["patch"]
+                    else:
+                        return f"Error fetching content for {file_path}: {original_content}"
+                else:
+                    # Apply patch to existing content
+                    patch_lines = file_change["patch"].splitlines()
+                    original_lines = original_content.splitlines()
+                    
+                    # Use difflib to apply unified diff (simple implementation)
+                    patched_lines = list(difflib.unified_diff(original_lines, patch_lines, lineterm=''))
+                    final_content = '\n'.join(patched_lines)
+                    
+                    # Validate deletions
+                    diff = list(difflib.unified_diff(original_lines, final_content.splitlines(), lineterm=''))
+                    deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+                    total_original = len(original_lines)
+                    deletion_pct = deletions / total_original if total_original > 0 else 0
+                    
+                    if deletion_pct > 0.05:  # Strict 5% threshold
+                        return f"Error: Patch for '{file_path}' would cause {deletion_pct:.2%} deletions (>5%). Please provide a minimal patch or split changes."
+            
+            elif "new_content" in file_change:
+                # Legacy full content (warn and validate)
+                logger.warning(f"Using legacy full content for {file_path} - consider using patches for safety")
+                original_content = get_file_content(repo, file_path, base_branch)
+                if "Error" not in original_content:
+                    # Quick deletion check for legacy mode
+                    original_lines = original_content.splitlines()
+                    new_lines = file_change["new_content"].splitlines()
+                    diff = list(difflib.unified_diff(original_lines, new_lines, lineterm=''))
+                    deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+                    total_original = len(original_lines)
+                    deletion_pct = deletions / total_original if total_original > 0 else 0
+                    if deletion_pct > 0.05:
+                        return f"Error: Full content for '{file_path}' would delete {deletion_pct:.2%} (>5%). Use patch mode instead."
+                final_content = file_change["new_content"]
+            else:
+                return f"Error: File change for '{file_path}' must provide 'patch' or 'new_content'"
+            
             tree.append(
                 {
                     "path": file_change["file_path"],
                     "mode": "100644",
                     "type": "blob",
-                    "content": file_change["new_content"],
+                    "content": final_content,
                 }
             )
 
