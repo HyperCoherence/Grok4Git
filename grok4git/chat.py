@@ -276,22 +276,21 @@ Use `/command` syntax for quick actions:
     def _display_response(self, content: str) -> None:
         """Display AI response with rich formatting."""
         if content:
+            # Display the Grok header
+            self.console.print("[bold green]🤖 Grok:[/bold green]")
+            self.console.print()  # Add blank line for spacing
+            
             # Try to render as markdown if it looks like markdown
             if any(marker in content for marker in ["#", "*", "`", "```", "-"]):
                 try:
-                    self.console.print(
-                        Panel(
-                            Markdown(content),
-                            title="[bold green]🤖 Grok[/bold green]",
-                            border_style="green",
-                            padding=(1, 2),
-                        )
-                    )
+                    self.console.print(Markdown(content))
                 except Exception:
                     # Fall back to plain text if markdown parsing fails
-                    self.console.print(f"[bold green]🤖 Grok:[/bold green] {content}")
+                    self.console.print(content)
             else:
-                self.console.print(f"[bold green]🤖 Grok:[/bold green] {content}")
+                self.console.print(content)
+                
+            self.console.print()  # Add blank line after response
         else:
             self.console.print(
                 "[bold green]🤖 Grok:[/bold green] [yellow]No response content[/yellow]"
