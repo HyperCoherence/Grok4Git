@@ -431,6 +431,7 @@ def create_pull_request(
     commit_message: str,
     base_branch: Optional[str] = None,
     enable_peer_review: Optional[bool] = None,
+    user_request_context: Optional[str] = None,
 ) -> str:
     """
     Create a pull request in a GitHub repository with changes to multiple files.
@@ -444,6 +445,7 @@ def create_pull_request(
         commit_message: Commit message for the changes
         base_branch: Base branch (defaults to repository's default branch)
         enable_peer_review: Enable peer review (defaults to config setting)
+        user_request_context: Original user request for context in peer review
 
     Returns:
         URL of the created pull request or error message
@@ -463,7 +465,7 @@ def create_pull_request(
             logger.info("Peer review enabled - initiating peer review process")
             
             try:
-                # Create peer review context
+                # Create peer review context with user request context
                 review_context = create_peer_review_context(
                     repo=repo,
                     title=title,
@@ -471,7 +473,8 @@ def create_pull_request(
                     files=files,
                     commit_message=commit_message,
                     branch_name=new_branch,
-                    base_branch=base_branch
+                    base_branch=base_branch,
+                    user_request=user_request_context
                 )
                 
                 # Orchestrate peer review
@@ -587,6 +590,12 @@ def create_pull_request(
         # Prepare tree data - GitHub automatically creates directory structure
         tree = []
         for file_change in files:
+            # Validate file path
+            if not file_change.get("file_path"):
+                return f"Error: Invalid file in files array - missing 'file_path'"
+            if not file_change.get("new_content"):
+                return f"Error: Invalid file in files array - missing 'new_content'"
+            
             tree.append(
                 {
                     "path": file_change["file_path"],
@@ -599,10 +608,16 @@ def create_pull_request(
         # Create new tree
         tree_url = f"{config.github_api_base_url}/repos/{repo}/git/trees"
         tree_data = {"base_tree": base_tree_sha, "tree": tree}
+        
+        # Log the tree creation for debugging
+        logger.info(f"Creating tree with base_tree: {base_tree_sha}, {len(tree)} files")
+        for file_item in tree:
+            logger.info(f"  - {file_item['path']}")
 
         try:
             response = github_api.make_request("POST", tree_url, data=tree_data)
             new_tree_sha = response.json()["sha"]
+            logger.info(f"Successfully created tree: {new_tree_sha}")
         except Exception as e:
             if "404" in str(e):
                 return (
@@ -612,8 +627,9 @@ def create_pull_request(
                     f"  - Repository may be private and token lacks access\n"
                     f"  - Temporary GitHub API authentication issue\n"
                     f"  - Invalid base_tree SHA (repository may be empty)\n"
-                    f"Note: GitHub automatically creates directory structure for nested file paths.\n"
-                    f"Files being created: {[f['file_path'] for f in files]}\n"
+                    f"Note: GitHub Tree API with base_tree preserves existing files and only modifies specified files.\n"
+                    f"Base tree SHA: {base_tree_sha}\n"
+                    f"Files being created/updated: {[f['path'] for f in tree]}\n"
                     f"Original error: {str(e)}"
                 )
             else:
@@ -1470,18 +1486,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_bulk_file_content",
-            "description": "Get the content of multiple specific files in a GitHub repository as a single structured blob. More efficient than reading files individually and provides better context about codebase structure.",
+            "description": "Get the content of multiple specific files in a GitHub repository as a single structured blob. BEHAVIOR: More efficient than reading files individually and provides better context about codebase structure. Files larger than 1MB are automatically skipped with notes. Returns structured output with file separators. IMPORTANT: Use this for reading multiple related files at once - much faster than individual calls.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "repo": {
                         "type": "string",
-                        "description": "Repository name, e.g., username/repo",
+                        "description": "Repository name in format 'owner/repo', e.g., 'microsoft/vscode'",
                     },
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of file paths to read",
+                        "description": "List of file paths to read relative to repository root, e.g., ['src/main.py', 'README.md', 'package.json']",
                     },
                     "branch": {
                         "type": "string",
@@ -1496,19 +1512,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_file_content",
-            "description": "Get the content of a single file in a GitHub repository.",
+            "description": "Get the content of a single file in a GitHub repository. BEHAVIOR: Returns the complete file content as a string. For files larger than 1MB, returns a summary with first/last lines. Binary files return an error. IMPORTANT: This reads the file at the specified branch/commit - use 'branch' parameter for non-default branches.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "repo": {
                         "type": "string",
-                        "description": "Repository name, e.g., username/repo",
+                        "description": "Repository name in format 'owner/repo', e.g., 'microsoft/vscode'",
                     },
-                    "path": {"type": "string", "description": "File path"},
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to repository root, e.g., 'src/main.py' or 'README.md'",
+                    },
                     "branch": {
                         "type": "string",
-                        "description": "Branch name, defaults to repo's default branch",
-                        "default": None,
+                        "description": "Branch name (optional, defaults to repository's default branch)",
                     },
                 },
                 "required": ["repo", "path"],
@@ -1519,7 +1537,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "create_pull_request",
-            "description": "Create a pull request with file changes. WORKFLOW: (1) Creates new branch, (2) Commits all files to that branch, (3) Optional peer review by second AI agent, (4) Opens PR from new branch to base branch. AUTOMATICALLY HANDLES: Empty repositories (creates files on new branch), nested directory creation (via GitHub Tree API), and comprehensive error recovery. PEER REVIEW: When enabled, a second AI agent reviews the PR before GitHub submission for improved code quality. IMPORTANT: Branch name must be unique and use only letters, numbers, hyphens, underscores. Max file size 1MB each.",
+            "description": "Create a pull request with file changes. WORKFLOW: (1) Creates new branch, (2) Commits all files to that branch, (3) Optional peer review by second AI agent, (4) Opens PR from new branch to base branch. AUTOMATICALLY HANDLES: Empty repositories (creates files on new branch), nested directory creation (via GitHub Tree API), and comprehensive error recovery. PEER REVIEW: When enabled, a second AI agent reviews the PR before GitHub submission for improved code quality. IMPORTANT: Branch name must be unique and use only letters, numbers, hyphens, underscores. Max file size 1MB each. BEHAVIOR: Uses GitHub Tree API with base_tree parameter - this preserves ALL existing files and only modifies/adds the specified files. Does NOT delete existing files unless explicitly specified.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1541,7 +1559,7 @@ TOOLS = [
                     },
                     "files": {
                         "type": "array",
-                        "description": "Array of files to create/update. Each file will be committed to the new branch. Example: [{'file_path': 'src/main.py', 'new_content': 'print(\"hello\")'}]",
+                        "description": "Array of files to create/update. Each file will be committed to the new branch. IMPORTANT: Only files specified here will be modified - existing files are preserved unless explicitly included. Example: [{'file_path': 'src/main.py', 'new_content': 'print(\"hello\")'}]",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -1568,7 +1586,12 @@ TOOLS = [
                     },
                     "enable_peer_review": {
                         "type": "boolean",
-                        "description": "Enable peer review by second AI agent before GitHub submission (defaults to config setting)",
+                        "description": "Enable peer review by second AI agent before GitHub submission (defaults to config setting). When enabled, a second AI agent with tool access reviews the PR for quality, security, and best practices.",
+                        "default": None,
+                    },
+                    "user_request_context": {
+                        "type": "string",
+                        "description": "Original user request for context in peer review (optional but recommended for better reviews)",
                         "default": None,
                     },
                 },

@@ -72,6 +72,7 @@ class PeerReviewContext:
     commit_message: str
     branch_name: str
     base_branch: Optional[str] = None
+    user_request: Optional[str] = None  # Original user request context
     
     # Review state
     current_iteration: int = 0
@@ -96,7 +97,7 @@ class PeerReviewContext:
 
 
 class PeerReviewAgent:
-    """AI agent specialized in code review."""
+    """AI agent specialized in code review with GitHub tool access."""
     
     def __init__(self):
         """Initialize the peer review agent."""
@@ -106,7 +107,7 @@ class PeerReviewAgent:
         )
         self.messages: List[Dict[str, Any]] = []
         self._setup_system_message()
-        logger.info("Peer review agent initialized")
+        logger.info("Enhanced peer review agent initialized with tool access")
     
     def _setup_system_message(self) -> None:
         """Setup specialized system message for code review."""
@@ -114,8 +115,19 @@ class PeerReviewAgent:
             "role": "system",
             "content": (
                 "You are a Senior Code Review Agent specialized in thorough, constructive peer review. "
+                "You have access to GitHub tools to explore repository context and provide comprehensive reviews. "
                 "Your primary responsibility is to review pull requests before they are submitted to GitHub. "
                 "You work alongside another AI agent and provide a second pair of eyes to ensure code quality.\n\n"
+                
+                "AVAILABLE TOOLS:\n"
+                "You have access to the same GitHub tools as the main agent, including:\n"
+                "- get_file_content: Read existing files to understand context\n"
+                "- list_directory_contents: Explore repository structure\n"
+                "- get_commit_history: Review recent changes\n"
+                "- get_repo_info: Understand repository metadata\n"
+                "- get_bulk_file_content: Read multiple files efficiently\n"
+                "- recursive_list_directory: Get full repository structure\n"
+                "Use these tools to understand the broader context before making review decisions.\n\n"
                 
                 "REVIEW CRITERIA:\n"
                 "- Code Quality: Style, patterns, maintainability, readability\n"
@@ -123,14 +135,17 @@ class PeerReviewAgent:
                 "- Best Practices: Following conventions, error handling, performance\n"
                 "- Documentation: Comments, commit messages, PR descriptions\n"
                 "- Testing: Consider test coverage and edge cases\n"
-                "- Architecture: Design patterns, modularity, dependencies\n\n"
+                "- Architecture: Design patterns, modularity, dependencies\n"
+                "- Context Awareness: How changes fit with existing codebase\n\n"
                 
                 "REVIEW PROCESS:\n"
-                "1. Analyze all file changes thoroughly\n"
-                "2. Review commit message and PR description\n"
-                "3. Check for security issues and best practices\n"
-                "4. Provide specific, actionable feedback\n"
-                "5. Make one of three decisions: APPROVE, REQUEST_CHANGES, or NEEDS_MAJOR_REVISION\n\n"
+                "1. Use tools to explore repository context if needed\n"
+                "2. Analyze all file changes thoroughly\n"
+                "3. Review commit message and PR description\n"
+                "4. Check for security issues and best practices\n"
+                "5. Consider how changes fit with existing code\n"
+                "6. Provide specific, actionable feedback\n"
+                "7. Make one of three decisions: APPROVE, REQUEST_CHANGES, or NEEDS_MAJOR_REVISION\n\n"
                 
                 "FEEDBACK GUIDELINES:\n"
                 "- Be constructive and specific\n"
@@ -138,6 +153,7 @@ class PeerReviewAgent:
                 "- Explain the 'why' behind suggestions\n"
                 "- Prioritize critical issues over minor style preferences\n"
                 "- Acknowledge good practices when you see them\n"
+                "- Use repository context to make informed suggestions\n"
                 "- Keep feedback concise but comprehensive\n\n"
                 
                 "DECISION CRITERIA:\n"
@@ -145,42 +161,93 @@ class PeerReviewAgent:
                 "- REQUEST_CHANGES: Specific improvements needed but overall approach is good\n"
                 "- NEEDS_MAJOR_REVISION: Significant architectural or design issues require rework\n\n"
                 
-                "Always provide your review in JSON format with: decision, feedback, suggestions, and reasoning."
+                "Always provide your review in JSON format with: decision, feedback, suggestions, and reasoning.\n"
+                "Use the available tools to gather additional context when needed for thorough reviews."
             )
         }
         self.messages.append(system_message)
     
     def review_pull_request(self, context: PeerReviewContext) -> Tuple[ReviewDecision, str, List[str]]:
-        """Review a pull request and provide feedback."""
+        """Review a pull request with tool access for enhanced context."""
         try:
-            # Prepare review request
+            # Import tools here to avoid circular imports
+            from .tools import TOOLS, TOOL_FUNCTIONS
+            
+            # Prepare review request with enhanced context
             review_request = self._format_review_request(context)
             self.messages.append({"role": "user", "content": review_request})
             
-            # Get review response
+            # Get review response with tool access
             response = self.client.chat.completions.create(
                 model=config.peer_review_model,
                 messages=self.messages,
+                tools=TOOLS,  # Give peer review agent access to the same tools
+                tool_choice="auto",
                 temperature=0.3  # Lower temperature for more consistent reviews
             )
             
-            response_content = response.choices[0].message.content
+            response_message = response.choices[0].message
+            self.messages.append(response_message)
+            
+            # Handle tool calls if the agent wants to explore the repository
+            if response_message.tool_calls:
+                logger.info(f"Peer review agent is using {len(response_message.tool_calls)} tools for context")
+                
+                for tool_call in response_message.tool_calls:
+                    try:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        
+                        if tool_name in TOOL_FUNCTIONS:
+                            result = TOOL_FUNCTIONS[tool_name](**tool_args)
+                            self.messages.append({
+                                "role": "tool",
+                                "content": result,
+                                "tool_call_id": tool_call.id
+                            })
+                            logger.info(f"Peer review agent used tool: {tool_name}")
+                        else:
+                            logger.warning(f"Unknown tool called by peer review agent: {tool_name}")
+                            self.messages.append({
+                                "role": "tool",
+                                "content": f"Error: Unknown tool {tool_name}",
+                                "tool_call_id": tool_call.id
+                            })
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_call.function.name}: {str(e)}")
+                        self.messages.append({
+                            "role": "tool",
+                            "content": f"Error: {str(e)}",
+                            "tool_call_id": tool_call.id
+                        })
+                
+                # Get final review after tool usage
+                final_response = self.client.chat.completions.create(
+                    model=config.peer_review_model,
+                    messages=self.messages,
+                    temperature=0.3
+                )
+                
+                final_response_message = final_response.choices[0].message
+                self.messages.append(final_response_message)
+                response_content = final_response_message.content
+            else:
+                response_content = response_message.content
+            
             if not response_content:
                 raise ValueError("No response content received from peer review agent")
-            
-            self.messages.append({"role": "assistant", "content": response_content})
             
             # Parse the response
             decision, feedback, suggestions = self._parse_review_response(response_content)
             
-            logger.info(f"Peer review completed with decision: {decision.value}")
+            logger.info(f"Enhanced peer review completed with decision: {decision.value}")
             return decision, feedback, suggestions
             
         except Exception as e:
-            logger.error(f"Error during peer review: {str(e)}")
+            logger.error(f"Error during enhanced peer review: {str(e)}")
             # Fallback to approval on error to avoid blocking PR submission
             fallback_feedback = (
-                f"Peer review encountered an error and fell back to approval: {str(e)}\n\n"
+                f"Enhanced peer review encountered an error and fell back to approval: {str(e)}\n\n"
                 f"**Fallback Review Notes:**\n"
                 f"- The peer review agent experienced a technical issue\n"
                 f"- This PR is being approved to avoid blocking development workflow\n"
@@ -194,7 +261,7 @@ class PeerReviewAgent:
             ]
     
     def _format_review_request(self, context: PeerReviewContext) -> str:
-        """Format the review request for the AI agent."""
+        """Format the review request for the AI agent with enhanced context."""
         files_content = []
         for file_info in context.files:
             files_content.append(f"**File: {file_info['file_path']}**\n```\n{file_info['new_content']}\n```")
@@ -202,7 +269,7 @@ class PeerReviewAgent:
         files_section = "\n\n".join(files_content)
         
         review_request = f"""
-Please review this pull request before submission to GitHub:
+Please review this pull request before submission to GitHub. You have access to GitHub tools to explore repository context.
 
 **Repository:** {context.repo}
 **PR Title:** {context.title}
@@ -210,18 +277,27 @@ Please review this pull request before submission to GitHub:
 **Branch:** {context.branch_name} → {context.base_branch or 'main'}
 **Commit Message:** {context.commit_message}
 
+**Original User Request Context:**
+{context.user_request or 'No original request context provided'}
+
 **Files Changed:**
 {files_section}
 
 **Review History:**
 {self._format_review_history(context)}
 
+**Instructions:**
+1. Use available GitHub tools to explore repository context if needed
+2. Consider how these changes fit with the existing codebase
+3. Evaluate code quality, security, and best practices
+4. Provide specific, actionable feedback
+
 Please provide your review in the following JSON format:
 {{
     "decision": "approve|request_changes|needs_major_revision",
     "feedback": "Overall assessment and key points",
     "suggestions": ["Specific suggestion 1", "Specific suggestion 2", ...],
-    "reasoning": "Explanation of your decision"
+    "reasoning": "Explanation of your decision and any tool usage"
 }}
 """
         return review_request
@@ -516,7 +592,8 @@ class PeerReviewOrchestrator:
 
 # Factory function for easy integration
 def create_peer_review_context(repo: str, title: str, body: str, files: List[Dict[str, str]], 
-                             commit_message: str, branch_name: str, base_branch: Optional[str] = None) -> PeerReviewContext:
+                             commit_message: str, branch_name: str, base_branch: Optional[str] = None,
+                             user_request: Optional[str] = None) -> PeerReviewContext:
     """Create a peer review context from PR parameters."""
     return PeerReviewContext(
         repo=repo,
@@ -525,5 +602,6 @@ def create_peer_review_context(repo: str, title: str, body: str, files: List[Dic
         files=files,
         commit_message=commit_message,
         branch_name=branch_name,
-        base_branch=base_branch
+        base_branch=base_branch,
+        user_request=user_request
     ) 

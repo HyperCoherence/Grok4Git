@@ -11,6 +11,7 @@ import shutil
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.prompt import Prompt
+import sys
 
 # Configure logging
 logging.basicConfig(
@@ -29,7 +30,18 @@ class Config:
     def __init__(self):
         """Initialize configuration by loading environment variables."""
         load_dotenv()
-        self._ensure_env_setup()
+        # Only run interactive setup if not in testing/CI environment
+        if not self._is_testing_environment():
+            self._ensure_env_setup()
+
+    def _is_testing_environment(self) -> bool:
+        """Check if we're running in a testing environment."""
+        return (
+            os.getenv("PYTEST_CURRENT_TEST") is not None or
+            os.getenv("CI") is not None or
+            os.getenv("GITHUB_ACTIONS") is not None or
+            "pytest" in sys.modules
+        )
 
     @property
     def xai_api_key(self) -> str:

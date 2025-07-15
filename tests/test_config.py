@@ -103,10 +103,13 @@ class TestConfig:
     )
     @patch("grok4git.config.os.path.exists")
     @patch("grok4git.config.load_dotenv")
-    def test_config_validation_fails_with_missing_vars(self, mock_load_dotenv, mock_exists):
+    @patch("grok4git.config.Config._is_testing_environment")
+    def test_config_validation_fails_with_missing_vars(self, mock_is_testing_env, mock_load_dotenv, mock_exists):
         """Test that config validation fails with missing required variables."""
         # Mock that .env exists to skip interactive setup
         mock_exists.return_value = True
+        # Mock that we're NOT in testing environment so validation runs
+        mock_is_testing_env.return_value = False
 
         with pytest.raises(ValueError, match="Missing required environment variables"):
             Config()
