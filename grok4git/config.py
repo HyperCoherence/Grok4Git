@@ -108,6 +108,16 @@ class Config:
         """Get maximum number of review iterations allowed."""
         return int(os.getenv("MAX_REVIEW_ITERATIONS", "3"))
 
+    @property
+    def auto_recover_empty_responses(self) -> bool:
+        """Get whether to automatically recover from empty responses."""
+        return os.getenv("AUTO_RECOVER_EMPTY_RESPONSES", "true").lower() == "true"
+
+    @property
+    def max_recovery_attempts(self) -> int:
+        """Get maximum number of recovery attempts for empty responses."""
+        return int(os.getenv("MAX_RECOVERY_ATTEMPTS", "2"))
+
     def _ensure_env_setup(self) -> None:
         """Ensure environment variables are set up, prompt user if missing."""
         # Check if .env exists, if not, check if .env.example exists and copy it
@@ -222,6 +232,12 @@ PEER_REVIEW_MODEL={self.peer_review_model}
 
 # Optional: Maximum number of review iterations
 MAX_REVIEW_ITERATIONS={self.max_review_iterations}
+
+# Optional: Auto-recover from empty responses
+AUTO_RECOVER_EMPTY_RESPONSES={str(self.auto_recover_empty_responses).lower()}
+
+# Optional: Maximum recovery attempts for empty responses
+MAX_RECOVERY_ATTEMPTS={self.max_recovery_attempts}
 """
 
         with open(".env", "w") as f:

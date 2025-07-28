@@ -95,6 +95,22 @@ class CommandRegistry:
                 examples=["/peer-review-status"],
                 aliases=["peer-status", "pr-review-status"],
             ),
+            Command(
+                name="auto-recovery-toggle",
+                description="Enable or disable auto-recovery from empty responses",
+                category=CommandCategory.SYSTEM,
+                usage="/auto-recovery-toggle [enable|disable]",
+                examples=["/auto-recovery-toggle enable", "/auto-recovery-toggle disable", "/auto-recovery-toggle"],
+                aliases=["recovery-toggle", "auto-recovery"],
+            ),
+            Command(
+                name="auto-recovery-status",
+                description="Show current auto-recovery configuration",
+                category=CommandCategory.SYSTEM,
+                usage="/auto-recovery-status",
+                examples=["/auto-recovery-status"],
+                aliases=["recovery-status"],
+            ),
             # Convenience Commands
             Command(
                 name="repos",

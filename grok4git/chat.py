@@ -77,7 +77,10 @@ class GrokChat:
                 "- Use formatting to make responses visually appealing\n"
                 "- When showing code or file content, use proper formatting\n"
                 "- Offer suggestions and best practices when relevant\n"
-                "- If an operation fails, explain why and suggest alternatives\n\n"
+                "- If an operation fails, explain why and suggest alternatives\n"
+                "- CRITICAL: Always provide a meaningful response, even if just to acknowledge completion\n"
+                "- Never send empty responses - if you have nothing specific to say, at least confirm the action was completed\n"
+                "- If you forget to respond after using tools, provide a brief summary of what was accomplished\n\n"
                 "TOOL USAGE GUIDELINES:\n"
                 "- For code review: Use get_commit_history to find commits, then get_commit_details and get_commit_diff to analyze changes\n"
                 "- For PRs: Branch names must be unique and descriptive (e.g., 'feature/add-logging' or 'fix/auth-bug')\n"
@@ -122,25 +125,19 @@ Use `/command` for controlling the CLI client:
 - `/repos` - Quick list of your repositories
 - `/peer-review-toggle` - Enable/disable peer review
 - `/peer-review-status` - Show peer review settings
+- `/auto-recovery-toggle` - Enable/disable auto-recovery from empty responses
+- `/auto-recovery-status` - Show auto-recovery settings
 
 ### 🎯 **What I Can Do**
 - Repository management and analysis
 - File operations and content reading
 - Commit review and diff analysis
 - Pull request creation and management
-- **Peer review system** - Second AI agent reviews PRs before submission
 - Issue tracking and creation
 - Branch operations and history
 
-### 🔄 **How It Works**
-- **Natural language** → AI Agent → GitHub operations
-- **Slash commands** → Direct client control (no AI needed)
-
 ### ⚡ **Pro Tips**
 - **Ctrl+C** to interrupt long-running requests
-- Use natural language for GitHub operations
-- Use slash commands only for client control
-- **Context window status** shown before each prompt
 - Use `/clear` to reset context when it gets full
 - Try `/help` to see all available commands
 
@@ -318,6 +315,14 @@ Use `/command` for controlling the CLI client:
             self._execute_peer_review_status()
             return False
 
+        elif cmd.name == "auto-recovery-toggle":
+            self._execute_auto_recovery_toggle(args)
+            return False
+
+        elif cmd.name == "auto-recovery-status":
+            self._execute_auto_recovery_status()
+            return False
+
         # Unknown command (shouldn't happen due to registry check above)
         self.console.print(f"[red]Unknown command: [bold]/{command_name}[/bold][/red]")
         return False
@@ -409,6 +414,83 @@ Use `/command` for controlling the CLI client:
             
         except Exception as e:
             self.console.print(f"[red]❌ Error toggling peer review: {str(e)}[/red]")
+
+    def _execute_auto_recovery_status(self) -> None:
+        """Execute /auto-recovery-status command directly."""
+        try:
+            status_text = f"""
+## 🔄 Auto-Recovery Configuration
+
+**Status:** {'🟢 ENABLED' if config.auto_recover_empty_responses else '🔴 DISABLED'}
+
+**Settings:**
+- Max Recovery Attempts: `{config.max_recovery_attempts}`
+- Environment Variable: `AUTO_RECOVER_EMPTY_RESPONSES={str(config.auto_recover_empty_responses).lower()}`
+
+**What it does:**
+When Grok fails to respond or returns empty content, the system will automatically:
+1. Remove the empty response from conversation history
+2. Add contextual recovery prompt explaining what happened
+3. Retry the request with enhanced context about recent tool calls
+4. Show "🔄 Auto-recovering..." status to user during attempts
+
+**Usage:**
+- Use `/auto-recovery-toggle enable` to enable auto-recovery
+- Use `/auto-recovery-toggle disable` to disable auto-recovery
+- Use `/auto-recovery-toggle` to toggle current state
+            """
+
+            self.console.print(
+                Panel(
+                    Markdown(status_text),
+                    title="[bold cyan]Auto-Recovery Status[/bold cyan]",
+                    border_style="cyan",
+                    padding=(1, 2),
+                )
+            )
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Error reading auto-recovery status: {str(e)}[/red]")
+
+    def _execute_auto_recovery_toggle(self, args: List[str]) -> None:
+        """Execute /auto-recovery-toggle command directly."""
+        try:
+            current_status = config.auto_recover_empty_responses
+            
+            if not args:
+                # Toggle current state
+                new_status = not current_status
+                action = "enabled" if new_status else "disabled"
+                self.console.print(f"[yellow]🔄 Toggling auto-recovery from {('enabled' if current_status else 'disabled')} to {action}[/yellow]")
+            else:
+                # Set specific state
+                arg = args[0].lower()
+                if arg in ["enable", "on", "true"]:
+                    new_status = True
+                    action = "enabled"
+                elif arg in ["disable", "off", "false"]:
+                    new_status = False
+                    action = "disabled"
+                else:
+                    self.console.print(f"[red]❌ Invalid argument: {args[0]}[/red]")
+                    self.console.print("[yellow]Usage: /auto-recovery-toggle [enable|disable][/yellow]")
+                    return
+            
+            # Update .env file
+            self._update_env_variable("AUTO_RECOVER_EMPTY_RESPONSES", str(new_status).lower())
+            
+            # Reload config
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+            
+            # Confirm the change
+            emoji = "🟢" if new_status else "🔴"
+            description = "automatic retry when Grok doesn't respond" if new_status else "manual error handling only"
+            self.console.print(f"[green]✅ Auto-recovery {action} {emoji}[/green]")
+            self.console.print(f"[dim]💡 Now using: {description}[/dim]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Error toggling auto-recovery: {str(e)}[/red]")
 
     def _update_env_variable(self, key: str, value: str) -> None:
         """Update a single environment variable in .env file."""
@@ -600,9 +682,16 @@ Use `/command` for controlling the CLI client:
                 
             self.console.print()  # Add blank line after response
         else:
-            self.console.print(
-                "[bold green]🤖 Grok:[/bold green] [yellow]No response content[/yellow]"
-            )
+            # This case should now be handled by auto-recovery in _process_ai_response
+            # But keeping as fallback for direct calls to _display_response
+            if config.auto_recover_empty_responses:
+                self.console.print(
+                    "[bold green]🤖 Grok:[/bold green] [yellow]No response content (recovery will be attempted)[/yellow]"
+                )
+            else:
+                self.console.print(
+                    "[bold green]🤖 Grok:[/bold green] [yellow]No response content[/yellow]"
+                )
 
     def _execute_tool(self, tool_call) -> str:
         """Execute a tool function call."""
@@ -796,6 +885,10 @@ Use `/command` for controlling the CLI client:
 
     def _process_ai_response(self) -> None:
         """Process AI response and handle tool calls."""
+        self._process_ai_response_with_recovery()
+
+    def _process_ai_response_with_recovery(self, recovery_attempt: int = 0) -> None:
+        """Process AI response with auto-recovery for empty responses."""
         try:
             with Status("[cyan]🤔 Thinking...", console=self.console):
                 response = self.client.chat.completions.create(  # type: ignore
@@ -817,14 +910,15 @@ Use `/command` for controlling the CLI client:
                     )
 
                 # Get final response after tool execution
-                self._process_ai_response()
+                self._process_ai_response_with_recovery(recovery_attempt)
             else:
                 # Display final response
                 content = response_message.content
-                if content:
+                if content and content.strip():
                     self._display_response(content)
                 else:
-                    self.console.print("[yellow]No response content received[/yellow]")
+                    # Handle empty response with auto-recovery
+                    self._handle_empty_response(recovery_attempt)
 
         except KeyboardInterrupt:
             self.console.print("\n[yellow]⚠️  Request interrupted by user[/yellow]")
@@ -835,6 +929,76 @@ Use `/command` for controlling the CLI client:
             logger.error(error_msg)
             self.console.print(f"[red]❌ Error: {error_msg}[/red]")
             self.console.print("[dim]💡 Tip: You can interrupt requests with Ctrl+C and try again[/dim]")
+
+    def _handle_empty_response(self, recovery_attempt: int) -> None:
+        """Handle empty responses with auto-recovery or fallback."""
+        if not config.auto_recover_empty_responses:
+            # Auto-recovery disabled, show original error message
+            self.console.print("[yellow]No response content received[/yellow]")
+            return
+
+        if recovery_attempt >= config.max_recovery_attempts:
+            # Max attempts reached, show enhanced error message
+            self.console.print("[yellow]No response content received after recovery attempts[/yellow]")
+            self.console.print("[dim]💡 Try rephrasing your request or use '/clear' to reset context[/dim]")
+            logger.warning(f"Failed to recover from empty response after {recovery_attempt} attempts")
+            return
+
+        # Attempt auto-recovery
+        logger.info(f"Attempting auto-recovery for empty response (attempt {recovery_attempt + 1}/{config.max_recovery_attempts})")
+        
+        # Remove the empty response message
+        if self.messages and self.messages[-1].get("role") == "assistant":
+            self.messages.pop()
+
+        # Analyze recent context for recovery message
+        recovery_context = self._build_recovery_context()
+        
+        # Add recovery prompt
+        recovery_message = {
+            "role": "user",
+            "content": (
+                f"You didn't provide any response to my previous message. {recovery_context}"
+                f"Please provide a meaningful response addressing my request. "
+                f"If you performed any actions, summarize what was accomplished. "
+                f"If you need clarification, ask specific questions."
+            )
+        }
+        self.messages.append(recovery_message)
+
+        # Show recovery status to user
+        status_text = f"[cyan]🔄 Auto-recovering from empty response (attempt {recovery_attempt + 1}/{config.max_recovery_attempts})..."
+        with Status(status_text, console=self.console):
+            import time
+            time.sleep(0.5)  # Brief pause to show status
+
+        # Retry with recovery context
+        self._process_ai_response_with_recovery(recovery_attempt + 1)
+
+    def _build_recovery_context(self) -> str:
+        """Build context information for recovery attempts."""
+        context_parts = []
+        
+        # Check for recent tool calls
+        recent_tool_calls = []
+        for msg in reversed(self.messages[-5:]):  # Check last 5 messages
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tool_call in msg["tool_calls"]:
+                    recent_tool_calls.append(tool_call.function.name)
+        
+        if recent_tool_calls:
+            tools_text = ", ".join(set(recent_tool_calls))
+            context_parts.append(f"You just executed these tools: {tools_text}.")
+        
+        # Check for user's original request
+        user_messages = [msg for msg in self.messages if msg.get("role") == "user"]
+        if user_messages:
+            last_user_msg = user_messages[-1].get("content", "")
+            # Exclude recovery messages
+            if not last_user_msg.startswith("You didn't provide any response"):
+                context_parts.append(f"My original request was: '{last_user_msg[:100]}{'...' if len(last_user_msg) > 100 else ''}'")
+        
+        return " ".join(context_parts) + " " if context_parts else ""
 
     def run(self) -> None:
         """Run the main chat loop."""
