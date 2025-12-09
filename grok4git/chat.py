@@ -1,30 +1,20 @@
 """
 Chat interface for Grok4Git.
 
-This module provides the interactive chat interface between the user and Grok,
-with enhanced terminal formatting, slash commands, and user experience improvements.
+This module maintains backward compatibility by re-exporting the refactored
+chat interface from the new chat package structure.
+
+All functionality has been moved to:
+- chat/ai_client.py - AI client management
+- chat/command_handlers.py - Command execution
+- chat/ui/ - UI components (display, prompts, formatters)
+- chat/interface.py - Main interface orchestration
 """
 
-import json
-import logging
-import os
-from typing import List, Dict, Any, Optional, Tuple
+# Backward compatibility: re-export GrokChat from new structure
+from .chat import GrokChat
 
-from openai import OpenAI
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.status import Status
-
-from .config import config
-from .tools import TOOLS, TOOL_FUNCTIONS
-from .commands import command_registry, command_parser, command_converter
-
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import HTML
-
-logger = logging.getLogger(__name__)
+__all__ = ["GrokChat"]
 
 
 class SlashCommandCompleter(Completer):

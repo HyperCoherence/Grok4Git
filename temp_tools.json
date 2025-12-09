@@ -1,0 +1,56 @@
+2025-12-09 14:32:51,172 - grok4git.config - INFO - Configuration validated successfully
+2025-12-09 14:32:51,174 - grok4git.github_api - INFO - GitHub API client initialized
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "D:\Projects_AI\Grok4\grok4git\__init__.py", line 28, in <module>
+    from . import tools
+  File "D:\Projects_AI\Grok4\grok4git\tools\__init__.py", line 10, in <module>
+    from ..services import (
+  File "D:\Projects_AI\Grok4\grok4git\services\__init__.py", line 10, in <module>
+    from .pull_requests import PullRequestService
+  File "D:\Projects_AI\Grok4\grok4git\services\pull_requests.py", line 12, in <module>
+    from ..peer_review import create_peer_review_context, PeerReviewOrchestrator
+  File "D:\Projects_AI\Grok4\grok4git\peer_review.py", line 15, in <module>
+    from openai import OpenAI
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\__init__.py", line 9, in <module>
+    from . import types
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\types\__init__.py", line 5, in <module>
+    from .batch import Batch as Batch
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\types\batch.py", line 6, in <module>
+    from .._models import BaseModel
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\_models.py", line 37, in <module>
+    from ._utils import (
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\_utils\__init__.py", line 1, in <module>
+    from ._logs import SensitiveHeadersFilter as SensitiveHeadersFilter
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\_utils\_logs.py", line 5, in <module>
+    from ._utils import is_dict
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\_utils\_utils.py", line 26, in <module>
+    from .._compat import parse_date as parse_date, parse_datetime as parse_datetime
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\openai\_compat.py", line 189, in <module>
+    class GenericModel(pydantic.BaseModel): ...
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_model_construction.py", line 237, in __new__
+    complete_model_class(
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\pydantic\_internal\_model_construction.py", line 620, in complete_model_class
+    cls.__pydantic_validator__ = create_schema_validator(
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\pydantic\plugin\_schema_validator.py", line 39, in create_schema_validator
+    plugins = get_plugins()
+              ^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Roaming\Python\Python312\site-packages\pydantic\plugin\_loader.py", line 40, in get_plugins
+    for entry_point in dist.entry_points:
+                       ^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\importlib\metadata\__init__.py", line 471, in entry_points
+    return EntryPoints._from_text_for(self.read_text('entry_points.txt'), self)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\importlib\metadata\__init__.py", line 819, in read_text
+    return self._path.joinpath(filename).read_text(encoding='utf-8')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen codecs>", line 309, in __init__
+KeyboardInterrupt
+^C

@@ -120,6 +120,14 @@ class CommandRegistry:
                 examples=["/repos", "/repos private", "/repos public"],
                 aliases=["repositories"],
             ),
+            Command(
+                name="history",
+                description="Show recent conversation history",
+                category=CommandCategory.SYSTEM,
+                usage="/history [count]",
+                examples=["/history", "/history 10"],
+                aliases=["hist", "conversation"],
+            ),
         ]
 
         for cmd in commands:
